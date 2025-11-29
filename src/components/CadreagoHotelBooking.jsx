@@ -1935,17 +1935,6 @@ const CadreagoApp = () => {
 
                 {/* Price Card */}
                 <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
-                  <div className="mb-4 md:mb-6">
-                    <div className="text-xs md:text-sm text-gray-600 mb-2">Rating</div>
-                    <div className="flex items-baseline space-x-2 mb-2">
-                      <div className="text-3xl md:text-4xl lg:text-5xl font-bold text-blue-600">
-                        {selectedHotel.rating}
-                      </div>
-                    </div>
-                    <div className="text-sm md:text-base text-gray-700 font-medium">{selectedHotel.ratingText}</div>
-                    <div className="text-xs md:text-sm text-gray-500">{selectedHotel.reviews} verified user ratings</div>
-                  </div>
-
                   <div className="border-t pt-4 md:pt-6">
                     <div className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">${selectedHotel.price}</div>
                     <div className="text-xs md:text-sm text-gray-600 mb-4">per night</div>
