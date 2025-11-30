@@ -1,5 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Search, Calendar, Users, Star, MapPin, Wifi, Car, Utensils, Waves, ThumbsUp, ThumbsDown, Heart, Menu, X, ChevronDown, Filter, CheckCircle, Shield, Coffee, Wind, Dumbbell, Sparkles, Share2, ChevronLeft, ChevronRight, User, Mail, Phone, CreditCard, FileText, Download } from 'lucide-react';
+import brandLogo from '../assets/logo.png';
+import brandIcon from '../assets/logo_icon.png';
+import brandLogoDark from '../assets/logo_non-transperant.png';
+import { loadGoogleMaps } from '../lib/loadGoogleMaps';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
 const INR_CONVERSION_RATE = 83.5; // Mock conversion USD -> INR
@@ -8,6 +12,115 @@ const formatINR = (amount) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
     Math.round(amount)
   );
+const addonIconMap = {
+  Coffee,
+  Car,
+  Sparkles,
+  Calendar,
+  MapPin,
+  Wind,
+  Dumbbell,
+  Shield,
+  Utensils,
+  Waves,
+  CreditCard,
+  Wifi
+};
+
+const buildPriceMarkerIcon = (maps, label, isActive) => {
+  if (!maps) return null;
+  const background = isActive ? '#2563eb' : '#ffffff';
+  const textColor = isActive ? '#ffffff' : '#111827';
+  const border = isActive ? '#1d4ed8' : '#d1d5db';
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="132" height="52">
+      <g>
+        <rect x="1" y="1" rx="20" ry="20" width="130" height="38" fill="${background}" stroke="${border}" stroke-width="1.5"/>
+        <polygon points="48,39 84,39 66,51" fill="${background}" stroke="${border}" stroke-width="1.5"/>
+        <text x="66" y="25" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="600" text-anchor="middle" fill="${textColor}">
+          ${label}
+        </text>
+      </g>
+    </svg>
+  `;
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new maps.Size(132, 52),
+    anchor: new maps.Point(66, 52)
+  };
+};
+
+const createPriceMarkerElement = (label, subtitle, isActive) => {
+  const colors = {
+    background: isActive ? '#2563eb' : '#ffffff',
+    text: isActive ? '#f8fafc' : '#0f172a',
+    border: isActive ? '#1d4ed8' : '#d1d5db'
+  };
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.alignItems = 'center';
+  wrapper.style.justifyContent = 'center';
+  wrapper.style.padding = '6px 14px 10px';
+  wrapper.style.borderRadius = '999px';
+  wrapper.style.background = colors.background;
+  wrapper.style.color = colors.text;
+  wrapper.style.fontFamily = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  wrapper.style.fontWeight = '600';
+  wrapper.style.boxShadow = '0 10px 30px rgba(15,23,42,0.18)';
+  wrapper.style.border = `1px solid ${colors.border}`;
+  wrapper.style.minWidth = '120px';
+  wrapper.style.pointerEvents = 'auto';
+  wrapper.style.cursor = 'pointer';
+
+  const priceEl = document.createElement('span');
+  priceEl.textContent = label;
+  priceEl.style.fontSize = '15px';
+
+  const subtitleEl = document.createElement('span');
+  subtitleEl.textContent = subtitle;
+  subtitleEl.style.fontSize = '11px';
+  subtitleEl.style.fontWeight = '500';
+  subtitleEl.style.opacity = '0.85';
+
+  const caret = document.createElement('div');
+  caret.style.position = 'absolute';
+  caret.style.bottom = '-9px';
+  caret.style.left = '50%';
+  caret.style.transform = 'translateX(-50%)';
+  caret.style.width = '0';
+  caret.style.height = '0';
+  caret.style.borderLeft = '9px solid transparent';
+  caret.style.borderRight = '9px solid transparent';
+  caret.style.borderTop = `9px solid ${colors.background}`;
+
+  wrapper.appendChild(priceEl);
+  wrapper.appendChild(subtitleEl);
+  wrapper.appendChild(caret);
+
+  return wrapper;
+};
+
+const updatePriceMarkerElement = (element, label, subtitle, isActive) => {
+  if (!element) return;
+  const [priceEl, subtitleEl, caret] = element.childNodes;
+  if (priceEl) priceEl.textContent = label;
+  if (subtitleEl) subtitleEl.textContent = subtitle;
+  const colors = {
+    background: isActive ? '#2563eb' : '#ffffff',
+    text: isActive ? '#f8fafc' : '#0f172a',
+    border: isActive ? '#1d4ed8' : '#d1d5db'
+  };
+  element.style.background = colors.background;
+  element.style.color = colors.text;
+  element.style.border = `1px solid ${colors.border}`;
+  if (caret) {
+    caret.style.borderTop = `9px solid ${colors.background}`;
+  }
+};
 
 const CadreagoApp = () => {
   const [currentView, setCurrentView] = useState('search');
@@ -33,7 +146,24 @@ const CadreagoApp = () => {
   const [shareUrl, setShareUrl] = useState('');
   const [showMessageHostModal, setShowMessageHostModal] = useState(false);
   const hostMessageRef = useRef(null);
+  const mapContainerRef = useRef(null);
+  const googleMapRef = useRef(null);
+  const googleMapsApiRef = useRef(null);
+  const mapMarkersRef = useRef(new Map());
+  const advancedMarkerClassRef = useRef(null);
+  const [preferredUserType, setPreferredUserType] = useState('guest');
+  const [hostOnboardingCompleted, setHostOnboardingCompleted] = useState(true);
+  const [showAddAddonModal, setShowAddAddonModal] = useState(false);
+  const [addonForm, setAddonForm] = useState({ propertyId: '', name: '', description: '', price: '' });
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [payoutForm, setPayoutForm] = useState({ amount: '', notes: '' });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [mapSelectedHotel, setMapSelectedHotel] = useState(null);
+  const [mapZoom, setMapZoom] = useState(6);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapError, setMapError] = useState('');
+  const [markerLibraryReady, setMarkerLibraryReady] = useState(false);
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [searchParams, setSearchParams] = useState({
     destination: 'Miami',
     checkIn: '2025-03-12',
@@ -57,7 +187,7 @@ const CadreagoApp = () => {
     {
       id: 1,
       hotelName: 'Bella Vista Resort',
-      location: 'Miami',
+      location: 'Kochi, Kerala',
       checkIn: '2025-04-15',
       checkOut: '2025-04-20',
       guests: '2 Adults',
@@ -296,6 +426,46 @@ const CadreagoApp = () => {
     }
   ];
 
+  const hostRefunds = [
+    {
+      id: 1,
+      bookingRef: 'CAD001230',
+      guestName: 'Emily Clark',
+      amount: 320,
+      method: 'UPI',
+      status: 'processed',
+      date: '2025-03-28'
+    },
+    {
+      id: 2,
+      bookingRef: 'CAD001225',
+      guestName: 'Rahul Mehta',
+      amount: 180,
+      method: 'Credit Card',
+      status: 'pending',
+      date: '2025-03-26'
+    }
+  ];
+
+  const hostPayouts = [
+    {
+      id: 1,
+      reference: 'PAYOUT001',
+      amount: 1450,
+      date: '2025-03-25',
+      status: 'completed',
+      method: 'Bank Transfer'
+    },
+    {
+      id: 2,
+      reference: 'PAYOUT002',
+      amount: 980,
+      date: '2025-03-29',
+      status: 'processing',
+      method: 'UPI'
+    }
+  ];
+
   // Detect screen size
   React.useEffect(() => {
     const handleResize = () => {
@@ -332,6 +502,18 @@ const CadreagoApp = () => {
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  };
+
+  const renderAddonIcon = (icon, size = 20) => {
+    if (!icon) return '✦';
+    if (typeof icon === 'string' && addonIconMap[icon]) {
+      const IconComponent = addonIconMap[icon];
+      return <IconComponent size={size} />;
+    }
+    if (typeof icon === 'string' && icon.length <= 3) {
+      return <span className="text-xl">{icon}</span>;
+    }
+    return <Sparkles size={size} />;
   };
 
   const getGuestText = () => {
@@ -399,7 +581,10 @@ const CadreagoApp = () => {
     setIsLoggedIn(true);
     setUserType(type);
     setShowAuthModal(false);
-    setCurrentView(type === 'host' ? 'host-dashboard' : 'dashboard'); // Navigate based on user type
+    const destination = type === 'host'
+      ? (hostOnboardingCompleted ? 'host-dashboard' : 'host-onboarding')
+      : 'dashboard';
+    setCurrentView(destination); // Navigate based on user type
   };
 
   const handleSignup = (name, email, password, type = 'guest') => {
@@ -412,7 +597,12 @@ const CadreagoApp = () => {
     setIsLoggedIn(true);
     setUserType(type);
     setShowAuthModal(false);
-    setCurrentView(type === 'host' ? 'host-dashboard' : 'dashboard'); // Navigate based on user type
+    if (type === 'host') {
+      setHostOnboardingCompleted(false);
+      setCurrentView('host-onboarding');
+    } else {
+      setCurrentView('dashboard');
+    }
   };
 
   const handleLogout = () => {
@@ -425,11 +615,10 @@ const CadreagoApp = () => {
     priceRange: [0, 500],
     rating: 'all',
     type: 'all',
-    amenities: [],
-    showMobile: false
+    amenities: []
   });
 
-  const hotels = [
+  const hotels = React.useMemo(() => ([
     {
       id: 1,
       name: 'Bella Vista Resort',
@@ -447,8 +636,9 @@ const CadreagoApp = () => {
         'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&h=600&fit=crop'
       ],
       amenities: ['Pool', 'Spa', 'Parking', 'WiFi'],
-      address: '142, Lorem ipsum dolor sit, MD 02203 - Miami',
-      description: 'Experience luxury and comfort at Bella Vista Resort. Our resort offers stunning ocean views, world-class amenities, and exceptional service.',
+      address: 'Fort Kochi Beach Road, Kerala 682001, India',
+      coordinates: { lat: 9.9312, lng: 76.2673 },
+      description: 'Experience backwater luxury at Bella Vista Resort with curated Ayurvedic spa rituals, lagoon pools, and coastal dining.',
       services: {
         reception: true,
         tv: true,
@@ -484,16 +674,15 @@ const CadreagoApp = () => {
         }
       ],
       host: {
-        name: 'Maria Rodriguez',
-        avatar: 'MR',
+        name: 'Malini Varma',
+        avatar: 'MV',
         properties: 3,
         memberSince: '2020',
-        responseRate: 98,
-        responseTime: '1 hour',
+        bio: 'Heritage host curating soulful stays across God’s Own Country.',
         verified: true,
-        languages: ['English', 'Spanish'],
-        email: 'maria@bellavista.com',
-        phone: '+1 (305) 555-0123'
+        languages: ['English', 'Malayalam', 'Hindi'],
+        email: 'malini@bellavista.in',
+        phone: '+91 80750 12345'
       },
       addons: [
         { id: 'breakfast', name: 'Breakfast', description: 'Continental breakfast for 2', price: 25, icon: 'Coffee' },
@@ -506,7 +695,7 @@ const CadreagoApp = () => {
       id: 2,
       name: 'Bambu Indah',
       stars: 3,
-      location: 'Miami',
+      location: 'South Goa, Goa',
       rating: 6.2,
       ratingText: 'Pleasant',
       reviews: 147,
@@ -515,22 +704,22 @@ const CadreagoApp = () => {
       images: ['https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&h=600&fit=crop'],
       amenities: ['Pool', 'Parking', 'Elevator', 'WiFi'],
       ecoFriendly: true,
-      address: 'Eco resort in Miami',
-      description: 'Sustainable luxury at Bambu Indah.',
+      address: 'Palolem Beach Road, Canacona, Goa 403702, India',
+      coordinates: { lat: 15.0099, lng: 74.0237 },
+      description: 'Sustainable luxury amidst coconut groves with private plunge pools, vegan breakfasts, and curated surf lessons.',
       services: { reception: true, tv: true },
       reviewScores: { cleanliness: 7.5, location: 8.0 },
       userReviews: [],
       host: {
-        name: 'John Smith',
-        avatar: 'JS',
+        name: 'Raghav Menon',
+        avatar: 'RM',
         properties: 1,
         memberSince: '2022',
-        responseRate: 95,
-        responseTime: '2 hours',
+        bio: 'Former travel photographer hosting eco chic villas in Goa.',
         verified: true,
-        languages: ['English'],
-        email: 'john@bambuindah.com',
-        phone: '+1 (305) 555-0456'
+        languages: ['English', 'Hindi', 'Konkani'],
+        email: 'raghav@bambuindah.in',
+        phone: '+91 88844 56780'
       },
       addons: [
         { id: 'breakfast', name: 'Organic Breakfast', description: 'Farm-to-table breakfast', price: 30, icon: 'Coffee' },
@@ -542,7 +731,7 @@ const CadreagoApp = () => {
       id: 3,
       name: 'Pandora Guesthouse',
       stars: 5,
-      location: 'Miami',
+      location: 'Udaipur, Rajasthan',
       rating: 9.6,
       ratingText: 'Wonderful',
       reviews: 241,
@@ -551,22 +740,22 @@ const CadreagoApp = () => {
       images: ['https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=800&h=600&fit=crop'],
       amenities: ['Parking', 'Elevator'],
       ecoFriendly: true,
-      address: 'Boutique guesthouse',
-      description: 'Charming guesthouse.',
+      address: 'Lake Pichola Road, Udaipur 313001, India',
+      coordinates: { lat: 24.5854, lng: 73.7125 },
+      description: 'Charming haveli with marble courtyards, rooftop ghazals, and curated city palace tours.',
       services: { reception: true },
       reviewScores: { cleanliness: 9.5 },
       userReviews: [],
       host: {
-        name: 'Sarah Johnson',
-        avatar: 'SJ',
+        name: 'Saanvi Kapoor',
+        avatar: 'SK',
         properties: 5,
         memberSince: '2019',
-        responseRate: 100,
-        responseTime: '30 minutes',
+        bio: 'Heritage curator bringing royal Rajasthan experiences to modern travellers.',
         verified: true,
-        languages: ['English', 'French'],
-        email: 'sarah@pandoraguesthouse.com',
-        phone: '+1 (305) 555-0789'
+        languages: ['English', 'Hindi'],
+        email: 'saanvi@pandoraguesthouse.in',
+        phone: '+91 90040 88990'
       },
       addons: [
         { id: 'breakfast', name: 'Gourmet Breakfast', description: 'Chef-prepared breakfast', price: 35, icon: 'Coffee' },
@@ -578,7 +767,7 @@ const CadreagoApp = () => {
       id: 5,
       name: 'Island Palace Hotel',
       stars: 4,
-      location: 'Ibiza',
+      location: 'Andaman Islands',
       rating: 9.2,
       ratingText: 'Wonderful',
       reviews: 241,
@@ -589,22 +778,22 @@ const CadreagoApp = () => {
       limitedDeal: true,
       freeCancellation: true,
       roomsLeft: 1,
-      address: 'Beachfront hotel in Ibiza',
-      description: 'Stunning island views.',
+      address: 'Radhanagar Beach, Havelock Island, Andaman 744211, India',
+      coordinates: { lat: 11.9634, lng: 92.9873 },
+      description: 'Stunning island views with private scuba experiences, sandbar dinners, and rainforest spa journeys.',
       services: { reception: true, tv: true },
       reviewScores: { cleanliness: 9.0 },
       userReviews: [],
       host: {
-        name: 'Carlos Martinez',
-        avatar: 'CM',
+        name: 'Aditi Rao',
+        avatar: 'AR',
         properties: 2,
         memberSince: '2021',
-        responseRate: 97,
-        responseTime: '1 hour',
+        bio: 'Island host crafting eco-luxury trails across the Indian Ocean.',
         verified: true,
-        languages: ['English', 'Spanish', 'Catalan'],
-        email: 'carlos@islandpalace.com',
-        phone: '+34 555 123 456'
+        languages: ['English', 'Hindi', 'Tamil'],
+        email: 'aditi@islandpalace.in',
+        phone: '+91 96000 44567'
       },
       addons: [
         { id: 'breakfast', name: 'Beachfront Breakfast', description: 'Breakfast with ocean view', price: 28, icon: 'Coffee' },
@@ -613,7 +802,12 @@ const CadreagoApp = () => {
         { id: 'champagne', name: 'Champagne Package', description: 'Premium champagne on arrival', price: 75, icon: 'Utensils' }
       ]
     }
-  ];
+  ]), []);
+
+  const initialMapCenter = React.useMemo(() => {
+    const withCoordinates = hotels.find(hotel => hotel.coordinates);
+    return withCoordinates?.coordinates || { lat: 20.5937, lng: 78.9629 };
+  }, [hotels]);
 
   const toggleFavorite = (hotelId) => {
     setFavorites(prev => 
@@ -630,6 +824,170 @@ const CadreagoApp = () => {
   };
 
   const getRatingBarWidth = (score) => `${(score / 10) * 100}%`;
+
+  useEffect(() => {
+    let isMounted = true;
+    const apiKey = process.env.REACT_APP_GOOGLE_MAPS_KEY;
+
+    if (!apiKey) {
+      setMapError('Add REACT_APP_GOOGLE_MAPS_KEY to your .env.local file to enable Google Maps.');
+      return;
+    }
+
+    setMarkerLibraryReady(false);
+    loadGoogleMaps(apiKey)
+      .then((googleMaps) => {
+        if (!isMounted || !mapContainerRef.current) return;
+        googleMapsApiRef.current = googleMaps;
+
+        if (googleMaps.importLibrary) {
+          googleMaps.importLibrary('marker')
+            .then(({ AdvancedMarkerElement }) => {
+              if (!isMounted) return;
+              advancedMarkerClassRef.current = AdvancedMarkerElement;
+              setMarkerLibraryReady(true);
+            })
+            .catch((libError) => {
+              console.warn('Advanced markers unavailable, falling back to legacy markers.', libError);
+            });
+        }
+
+        googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
+          center: initialMapCenter,
+          zoom: 6,
+          gestureHandling: 'greedy',
+          disableDefaultUI: true,
+          zoomControl: true
+        });
+
+        googleMapRef.current.addListener('zoom_changed', () => {
+          const currentZoom = googleMapRef.current?.getZoom();
+          if (typeof currentZoom === 'number') {
+            setMapZoom(currentZoom);
+          }
+        });
+
+        googleMapRef.current.addListener('click', () => setMapSelectedHotel(null));
+        setMapError('');
+        setMapLoaded(true);
+      })
+      .catch((error) => setMapError(error.message));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initialMapCenter]);
+
+  useEffect(() => {
+    if (!mapLoaded || !googleMapsApiRef.current || !googleMapRef.current) {
+      return;
+    }
+
+    const maps = googleMapsApiRef.current;
+    const markerStore = mapMarkersRef.current;
+    const AdvancedMarkerElement = advancedMarkerClassRef.current;
+
+    markerStore.forEach(({ marker, cleanup }) => {
+      if (typeof cleanup === 'function') {
+        cleanup();
+      }
+      if (!marker) return;
+      if (typeof marker.setMap === 'function') {
+        marker.setMap(null);
+      } else {
+        marker.map = null;
+      }
+    });
+    markerStore.clear();
+
+    hotels.forEach((hotel) => {
+      if (!hotel.coordinates) return;
+
+      const subtitle = hotel.name.split(' ')[0];
+      const priceLabel = formatINR(convertToINR(hotel.price));
+
+      if (AdvancedMarkerElement) {
+        const contentEl = createPriceMarkerElement(priceLabel, subtitle, false);
+        const marker = new AdvancedMarkerElement({
+          map: googleMapRef.current,
+          position: hotel.coordinates,
+          content: contentEl,
+          zIndex: 1
+        });
+
+        const handleMarkerClick = (event) => {
+          event.stopPropagation?.();
+          event.preventDefault?.();
+          setMapSelectedHotel(hotel);
+          googleMapRef.current?.panTo(hotel.coordinates);
+        };
+
+        contentEl.addEventListener('click', handleMarkerClick);
+
+        markerStore.set(hotel.id, { marker, contentEl, cleanup: () => contentEl.removeEventListener('click', handleMarkerClick) });
+        return;
+      }
+
+      const fallbackMarker = new maps.Marker({
+        position: hotel.coordinates,
+        map: googleMapRef.current,
+        optimized: false,
+        icon: buildPriceMarkerIcon(maps, priceLabel, false)
+      });
+
+      fallbackMarker.addListener('click', () => {
+        setMapSelectedHotel(hotel);
+        googleMapRef.current?.panTo(hotel.coordinates);
+      });
+
+      markerStore.set(hotel.id, { marker: fallbackMarker });
+    });
+
+    return () => {
+      markerStore.forEach(({ marker, cleanup }) => {
+        if (typeof cleanup === 'function') {
+          cleanup();
+        }
+        if (!marker) return;
+        if (typeof marker.setMap === 'function') {
+          marker.setMap(null);
+        } else {
+          marker.map = null;
+        }
+      });
+      markerStore.clear();
+    };
+  }, [mapLoaded, hotels, markerLibraryReady]);
+
+  useEffect(() => {
+    if (!mapLoaded || !googleMapsApiRef.current) {
+      return;
+    }
+
+    const maps = googleMapsApiRef.current;
+    mapMarkersRef.current.forEach((entry, hotelId) => {
+      const hotel = hotels.find((item) => item.id === hotelId);
+      if (!hotel || !entry?.marker) return;
+
+      const label = formatINR(convertToINR(hotel.price));
+      const subtitle = hotel.name.split(' ')[0];
+      const isActive = mapSelectedHotel?.id === hotelId;
+
+      if (entry.contentEl) {
+        updatePriceMarkerElement(entry.contentEl, label, subtitle, isActive);
+        entry.marker.zIndex = isActive ? 2 : 1;
+        return;
+      }
+
+      const icon = buildPriceMarkerIcon(maps, label, isActive);
+      if (icon && typeof entry.marker.setIcon === 'function') {
+        entry.marker.setIcon(icon);
+      }
+      if (typeof entry.marker.setZIndex === 'function') {
+        entry.marker.setZIndex(isActive ? 2 : 1);
+      }
+    });
+  }, [mapLoaded, hotels, mapSelectedHotel]);
 
   // Guest Selector Component
   const GuestSelector = ({ show, onClose }) => {
@@ -713,8 +1071,14 @@ const CadreagoApp = () => {
       email: '',
       password: '',
       confirmPassword: '',
-      userType: 'guest' // guest or host
+      userType: preferredUserType // guest or host
     });
+
+    React.useEffect(() => {
+      if (showAuthModal) {
+        setFormData(prev => ({ ...prev, userType: preferredUserType }));
+      }
+    }, [preferredUserType, showAuthModal]);
 
     if (!showAuthModal) return null;
 
@@ -747,7 +1111,10 @@ const CadreagoApp = () => {
           <div className="mb-6 bg-gray-100 p-1 rounded-lg flex">
             <button
               type="button"
-              onClick={() => setFormData({...formData, userType: 'guest'})}
+              onClick={() => {
+                setFormData({...formData, userType: 'guest'});
+                setPreferredUserType('guest');
+              }}
               className={`flex-1 py-2 px-4 rounded-md font-semibold transition-colors ${
                 formData.userType === 'guest' 
                   ? 'bg-white text-blue-600 shadow-sm' 
@@ -758,7 +1125,10 @@ const CadreagoApp = () => {
             </button>
             <button
               type="button"
-              onClick={() => setFormData({...formData, userType: 'host'})}
+              onClick={() => {
+                setFormData({...formData, userType: 'host'});
+                setPreferredUserType('host');
+              }}
               className={`flex-1 py-2 px-4 rounded-md font-semibold transition-colors ${
                 formData.userType === 'host' 
                   ? 'bg-white text-blue-600 shadow-sm' 
@@ -948,10 +1318,17 @@ const CadreagoApp = () => {
     <header className="bg-white shadow-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <div className="flex items-center space-x-2 cursor-pointer" onClick={() => setCurrentView('search')}>
-            <span className={`${isMobile ? 'text-xl' : 'text-2xl'} font-bold`} style={{color: '#2563eb'}}>CADRE</span>
-            <Waves className="text-blue-600" size={isMobile ? 20 : 24} />
-            <span className={`${isMobile ? 'text-xl' : 'text-2xl'} font-bold text-gray-800`}>AGO</span>
+          <div className="flex items-center cursor-pointer space-x-2" onClick={() => setCurrentView('search')}>
+            <img
+              src={brandIcon}
+              alt="Cadreago icon"
+              className={`h-8 w-8 ${isMobile ? 'block' : 'hidden'} object-contain`}
+            />
+            <img
+              src={brandLogo}
+              alt="Cadreago logo"
+              className={`${isMobile ? 'hidden' : 'block'} h-10 object-contain`}
+            />
           </div>
           
           {/* Desktop Navigation (>= 360px) */}
@@ -992,10 +1369,20 @@ const CadreagoApp = () => {
                 </>
               ) : (
                 <>
-                  <button className="text-blue-600 hover:text-blue-700 font-medium">List your hotel</button>
+                  <button 
+                    onClick={() => {
+                      setPreferredUserType('host');
+                      setAuthMode('signup');
+                      setShowAuthModal(true);
+                    }}
+                    className="text-blue-600 hover:text-blue-700 font-medium"
+                  >
+                    I am a Host
+                  </button>
                   <button className="text-blue-600 hover:text-blue-700 font-medium">Help</button>
                   <button 
                     onClick={() => {
+                      setPreferredUserType('guest');
                       setAuthMode('login');
                       setShowAuthModal(true);
                     }}
@@ -1005,6 +1392,7 @@ const CadreagoApp = () => {
                   </button>
                   <button 
                     onClick={() => {
+                      setPreferredUserType('guest');
                       setAuthMode('signup');
                       setShowAuthModal(true);
                     }}
@@ -1101,11 +1489,16 @@ const CadreagoApp = () => {
             ) : (
               <>
                 <button 
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
-                >
-                  ➕ List your hotel
-                </button>
+                  onClick={() => {
+                    setPreferredUserType('host');
+                    setAuthMode('signup');
+                    setShowAuthModal(true);
+                    setMobileMenuOpen(false);
+                  }}
+                    className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
+                  >
+                    ➕ I am a Host
+                  </button>
                 <button 
                   onClick={() => setMobileMenuOpen(false)}
                   className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
@@ -1115,6 +1508,7 @@ const CadreagoApp = () => {
                 <div className="pt-3 border-t space-y-2">
                   <button 
                     onClick={() => {
+                      setPreferredUserType('guest');
                       setAuthMode('login');
                       setShowAuthModal(true);
                       setMobileMenuOpen(false);
@@ -1125,6 +1519,7 @@ const CadreagoApp = () => {
                   </button>
                   <button 
                     onClick={() => {
+                      setPreferredUserType('guest');
                       setAuthMode('signup');
                       setShowAuthModal(true);
                       setMobileMenuOpen(false);
@@ -1317,92 +1712,60 @@ const CadreagoApp = () => {
     </div>
   );
 
-  // Filter Sidebar
-  const FilterSidebar = () => (
-    <div className="bg-white rounded-lg shadow-md p-6 space-y-6">
-      <h3 className="text-lg font-bold text-gray-800">Filter by:</h3>
-
-      {/* Price */}
-      <div>
-        <h4 className="font-semibold text-gray-700 mb-3">Price</h4>
-        <div className="flex items-center space-x-2 mb-2">
-          <span className="text-sm">$</span>
+  // Filter row
+  const FilterBar = () => (
+    <div className="bg-white rounded-lg shadow-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 overflow-x-auto">
+      <div className="flex items-center space-x-3">
+        <Filter size={18} className="text-blue-600" />
+        <h3 className="text-sm font-semibold text-gray-800">Filters</h3>
+      </div>
+      <div className="flex flex-wrap items-center gap-4 flex-1">
+        <div className="flex items-center space-x-2">
+          <span className="text-xs text-gray-500">Min</span>
           <input 
             type="number" 
             value={filters.priceRange[0]}
             className="w-20 px-2 py-1 border rounded text-sm"
-            onChange={(e) => setFilters({...filters, priceRange: [parseInt(e.target.value), filters.priceRange[1]]})}
+            onChange={(e) => setFilters({...filters, priceRange: [Number(e.target.value) || 0, filters.priceRange[1]]})}
+          />
+          <span className="text-xs text-gray-500">Max</span>
+          <input 
+            type="number" 
+            value={filters.priceRange[1]}
+            className="w-20 px-2 py-1 border rounded text-sm"
+            onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Number(e.target.value) || 0]})}
           />
         </div>
-        <input 
-          type="range" 
-          min="0" 
-          max="500" 
-          value={filters.priceRange[1]}
-          onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], parseInt(e.target.value)]})}
-          className="w-full accent-blue-600"
-        />
-        <div className="flex space-x-2 mt-3">
-          <button className="px-3 py-1.5 text-sm border border-blue-600 text-blue-600 rounded hover:bg-blue-50 transition-colors">
-            Filter by price
-          </button>
-          <button className="px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors">
-            All prices
-          </button>
-        </div>
-      </div>
-
-      {/* Rating */}
-      <div>
-        <h4 className="font-semibold text-gray-700 mb-3">Rating</h4>
-        <div className="space-y-2">
-          {[
-            { value: '9', label: '9 or more - Wonderful' },
-            { value: '8', label: '8 Very good' },
-            { value: '7', label: '7 Good' },
-            { value: '6', label: '6 Pleasant' },
-            { value: 'all', label: 'All' }
-          ].map(option => (
-            <label key={option.value} className="flex items-center space-x-2 cursor-pointer">
-              <input 
-                type="radio" 
-                name="rating"
-                value={option.value}
-                checked={filters.rating === option.value}
-                onChange={(e) => setFilters({...filters, rating: e.target.value})}
-                className="accent-blue-600"
-              />
-              <span className="text-sm text-gray-700">{option.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Type of Stay */}
-      <div>
-        <h4 className="font-semibold text-gray-700 mb-3">Type of stay</h4>
-        <div className="space-y-2">
-          {[
-            { value: 'hotels', label: 'Hotels' },
-            { value: 'resorts', label: 'Resorts' },
-            { value: 'guesthouses', label: 'Guesthouses' },
-            { value: 'farmstays', label: 'Farm stays' },
-            { value: 'apartments', label: 'Apartments' },
-            { value: 'all', label: 'All' }
-          ].map(option => (
-            <label key={option.value} className="flex items-center space-x-2 cursor-pointer">
-              <input 
-                type="radio" 
-                name="type"
-                value={option.value}
-                checked={filters.type === option.value}
-                onChange={(e) => setFilters({...filters, type: e.target.value})}
-                className="accent-blue-600"
-              />
-              <span className="text-sm text-gray-700">{option.label}</span>
-            </label>
-          ))}
-        </div>
+        <select
+          value={filters.rating}
+          onChange={(e) => setFilters({...filters, rating: e.target.value})}
+          className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">Any rating</option>
+          <option value="9">9+ Wonderful</option>
+          <option value="8">8+ Very good</option>
+          <option value="7">7+ Good</option>
+          <option value="6">6+ Pleasant</option>
+        </select>
+        <select
+          value={filters.type}
+          onChange={(e) => setFilters({...filters, type: e.target.value})}
+          className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All stays</option>
+          <option value="hotels">Hotels</option>
+          <option value="resorts">Resorts</option>
+          <option value="guesthouses">Guesthouses</option>
+          <option value="farmstays">Farm stays</option>
+          <option value="apartments">Apartments</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setShowMoreFilters(!showMoreFilters)}
+          className="px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+        >
+          {showMoreFilters ? 'Hide filters' : 'More filters'}
+        </button>
       </div>
     </div>
   );
@@ -1415,6 +1778,7 @@ const CadreagoApp = () => {
         setSelectedHotel(hotel);
         setCurrentView('details');
       }}
+      onMouseEnter={() => setMapSelectedHotel(hotel)}
     >
       <div className="flex flex-col md:flex-row">
         {/* Image Section */}
@@ -1509,7 +1873,19 @@ const CadreagoApp = () => {
   );
 
   // Search Results matching image 1
-  const SearchResults = () => (
+  const SearchResults = () => {
+    const activeMapHotel = mapSelectedHotel;
+    const handleZoom = (delta) => {
+      setMapZoom(prev => {
+        const next = Math.min(13, Math.max(4, prev + delta));
+        if (googleMapRef.current) {
+          googleMapRef.current.setZoom(next);
+        }
+        return next;
+      });
+    };
+
+    return (
     <div className="bg-gray-50 min-h-screen">
       {/* Banner - Only visible on initial load */}
       <Banner />
@@ -1567,12 +1943,12 @@ const CadreagoApp = () => {
             <div>
               <label className="block text-sm text-gray-600 mb-1">Check in</label>
               <div className="relative">
-                <Calendar className="absolute left-2 md:left-3 top-2.5 md:top-3.5 text-gray-400 pointer-events-none" size={18} />
                 <input 
                   type="date"
                   value={searchParams.checkIn}
+                  min={new Date().toISOString().split('T')[0]}
                   onChange={(e) => setSearchParams({...searchParams, checkIn: e.target.value})}
-                  className="w-full pl-8 md:pl-10 pr-3 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
+                  className="w-full pl-3 pr-3 md:pl-4 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
                 />
               </div>
             </div>
@@ -1581,13 +1957,12 @@ const CadreagoApp = () => {
             <div>
               <label className="block text-sm text-gray-600 mb-1">Check out</label>
               <div className="relative">
-                <Calendar className="absolute left-2 md:left-3 top-2.5 md:top-3.5 text-gray-400 pointer-events-none" size={18} />
                 <input 
                   type="date"
                   value={searchParams.checkOut}
+                  min={searchParams.checkIn || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setSearchParams({...searchParams, checkOut: e.target.value})}
-                  min={searchParams.checkIn}
-                  className="w-full pl-8 md:pl-10 pr-3 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
+                  className="w-full pl-3 pr-3 md:pl-4 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
                 />
               </div>
             </div>
@@ -1613,25 +1988,50 @@ const CadreagoApp = () => {
           </button>
         </div>
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 md:gap-8">
-          {/* Filters Sidebar - Hidden on mobile by default, can be toggled */}
-          <div className="lg:col-span-1">
-            <div className="lg:hidden mb-4">
-              <button 
-                onClick={() => setFilters({...filters, showMobile: !filters.showMobile})}
-                className={`w-full flex items-center justify-center space-x-2 ${isMobile ? 'px-3 py-2 text-sm' : 'px-4 py-3'} bg-white border-2 border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 font-semibold transition-colors`}
-              >
-                <Filter size={isMobile ? 16 : 20} />
-                <span>Filters & Sort</span>
-              </button>
+        <div className="mb-6 space-y-4">
+          <FilterBar />
+          {showMoreFilters && (
+            <div className="bg-white rounded-lg shadow p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
+              <div>
+                <p className="font-semibold mb-2">Amenities</p>
+                <div className="flex flex-wrap gap-2">
+                  {['Pool', 'Spa', 'WiFi', 'Parking', 'Gym'].map(item => (
+                    <button
+                      key={item}
+                      type="button"
+                      className="px-3 py-1 border border-gray-300 rounded-full hover:bg-blue-50"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="font-semibold mb-2">Distance to city</p>
+                <select className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <option>Any distance</option>
+                  <option>&lt; 5 km</option>
+                  <option>&lt; 10 km</option>
+                  <option>&lt; 20 km</option>
+                </select>
+              </div>
+              <div>
+                <p className="font-semibold mb-2">Payment options</p>
+                <label className="flex items-center space-x-2">
+                  <input type="checkbox" className="accent-blue-600" />
+                  <span>Pay at hotel</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input type="checkbox" className="accent-blue-600" />
+                  <span>No prepayment</span>
+                </label>
+              </div>
             </div>
-            
-            <div className={`${filters.showMobile ? 'block' : 'hidden'} lg:block`}>
-              <FilterSidebar />
-            </div>
-          </div>
+          )}
+        </div>
 
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 md:gap-8">
           {/* Hotel List */}
           <div className="lg:col-span-3">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 space-y-3 sm:space-y-0">
@@ -1653,44 +2053,114 @@ const CadreagoApp = () => {
               ))}
             </div>
           </div>
+
+          {/* Map */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-md p-4 h-full">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Map view</h3>
+                  <p className="text-xs text-gray-500">Tap price to preview the property</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="flex bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => handleZoom(1)}
+                      disabled={mapZoom >= 13}
+                      className={`px-3 py-1 text-lg font-semibold text-gray-700 hover:bg-gray-50 ${mapZoom >= 13 ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleZoom(-1)}
+                      disabled={mapZoom <= 4}
+                      className={`px-3 py-1 text-lg font-semibold text-gray-700 border-l border-gray-200 hover:bg-gray-50 ${mapZoom <= 4 ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      −
+                    </button>
+                  </div>
+                  <button className="text-sm text-blue-600 hover:text-blue-700" onClick={() => setMapSelectedHotel(null)}>
+                    Reset
+                  </button>
+                </div>
+              </div>
+              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 h-[420px] md:h-[560px] lg:sticky lg:top-24">
+                <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
+
+                {!mapLoaded && !mapError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-gray-600 bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300">
+                    <span className="font-medium">Loading Google Maps…</span>
+                  </div>
+                )}
+
+                {mapError && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 bg-white/80 backdrop-blur">
+                    <p className="font-semibold text-gray-900 mb-1">Map unavailable</p>
+                    <p className="text-sm text-gray-600">{mapError}</p>
+                  </div>
+                )}
+
+                {activeMapHotel && (
+                  <div className="absolute bottom-4 left-4 right-4 bg-white rounded-xl shadow-2xl p-4 flex flex-col sm:flex-row gap-4 z-20">
+                    <button
+                      type="button"
+                      aria-label="Close map preview"
+                      className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 transition-colors"
+                      onClick={() => setMapSelectedHotel(null)}
+                    >
+                      <X size={18} />
+                    </button>
+                    <img
+                      src={activeMapHotel.image}
+                      alt={activeMapHotel.name}
+                      className="w-full sm:w-32 h-32 object-cover rounded-lg"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-lg font-semibold text-gray-900">{activeMapHotel.name}</h4>
+                        <div className={`px-2 py-1 rounded text-white text-sm ${getRatingColor(activeMapHotel.rating)}`}>
+                          {activeMapHotel.rating}
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-500 mb-2 flex items-center">
+                        <MapPin size={14} className="mr-1" />
+                        {activeMapHotel.location}
+                      </p>
+                      <p className="text-sm text-gray-600 mb-3">{activeMapHotel.description}</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xl font-bold text-gray-900">{formatINR(convertToINR(activeMapHotel.price))}</span>
+                        <button
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                          onClick={() => {
+                            setSelectedHotel(activeMapHotel);
+                            setCurrentView('details');
+                          }}
+                        >
+                          View & Book
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
+  };
 
   // Hotel Details
   const HotelDetails = () => {
     if (!selectedHotel) return null;
     const nightlyRateINR = convertToINR(selectedHotel.price);
-    const roomOptions = selectedHotel.roomOptions || [
-      {
-        id: 'standard',
-        name: 'Standard Room',
-        size: '280 sq ft',
-        bed: 'Queen Bed',
-        sleeps: 'Sleeps 2',
-        perks: ['City view', 'Complimentary WiFi'],
-        priceINR: nightlyRateINR
-      },
-      {
-        id: 'deluxe',
-        name: 'Deluxe Ocean View',
-        size: '360 sq ft',
-        bed: 'King Bed',
-        sleeps: 'Sleeps 3',
-        perks: ['Ocean view', 'Balcony', 'Breakfast included'],
-        priceINR: convertToINR(selectedHotel.price + 48)
-      },
-      {
-        id: 'suite',
-        name: 'Executive Suite',
-        size: '520 sq ft',
-        bed: 'King Bed + Sofa',
-        sleeps: 'Sleeps 4',
-        perks: ['Living area', 'Butler service', 'Premium minibar'],
-        priceINR: convertToINR(selectedHotel.price + 95)
-      }
-    ];
+    const addonOptions = (selectedHotel.addons && selectedHotel.addons.length > 0 ? selectedHotel.addons : availableAddons).map(addon => ({
+      ...addon,
+      priceINR: addon.price ? convertToINR(addon.price) : 0
+    }));
     const policyDetails = selectedHotel.policyDetails || [
       { title: 'Check-in', description: '3:00 PM onwards with express digital check-in' },
       { title: 'Check-out', description: '11:00 AM - late checkout available on request' },
@@ -1796,26 +2266,32 @@ const CadreagoApp = () => {
 
               <section>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-900">Rooms</h2>
-                  {selectedHotel.roomsLeft && (
-                    <span className="text-sm font-semibold text-red-600">Only {selectedHotel.roomsLeft} room{selectedHotel.roomsLeft > 1 ? 's' : ''} left at this price</span>
-                  )}
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-900">Add-ons & Services</h2>
+                  <span className="text-sm text-blue-600">Customize your stay with host curated extras</span>
                 </div>
                 <div className="space-y-4">
-                  {roomOptions.map(room => (
-                    <div key={room.id} className="border rounded-xl p-4 md:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-900">{room.name}</h3>
-                        <div className="text-sm text-gray-600 mt-1">{room.size} • {room.bed} • {room.sleeps}</div>
-                        <ul className="flex flex-wrap gap-2 mt-3 text-xs md:text-sm text-gray-600">
-                          {room.perks.map(perk => (
-                            <li key={perk} className="px-3 py-1 bg-gray-100 rounded-full">{perk}</li>
-                          ))}
-                        </ul>
+                  {addonOptions.map(addon => (
+                    <div key={addon.id} className="border rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div className="flex items-start space-x-4">
+                        <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 text-xl">
+                          {renderAddonIcon(addon.icon)}
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">{addon.name}</h3>
+                          <p className="text-sm text-gray-600">{addon.description}</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-gray-900">{formatINR(room.priceINR)}</p>
-                        <p className="text-xs text-gray-500">per night + taxes</p>
+                      <div className="text-right sm:text-right w-full sm:w-auto">
+                        {addon.priceINR > 0 ? (
+                          <>
+                            <p className="text-xl font-bold text-gray-900">{formatINR(addon.priceINR)}</p>
+                            <p className="text-xs text-gray-500">
+                              {addon.perPerson ? 'per guest' : 'per stay'}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-500">Included</p>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1945,20 +2421,7 @@ const CadreagoApp = () => {
                       </div>
                     </div>
 
-                    <div className="space-y-3 mb-4 pb-4 border-b">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Response rate:</span>
-                        <span className="font-semibold text-gray-900">{selectedHotel.host.responseRate}%</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Response time:</span>
-                        <span className="font-semibold text-gray-900">{selectedHotel.host.responseTime}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Languages:</span>
-                        <span className="font-semibold text-gray-900">{selectedHotel.host.languages.join(', ')}</span>
-                      </div>
-                    </div>
+                    <p className="text-sm text-gray-600 mb-4">{selectedHotel.host.bio || 'Trusted superhost on Cadreago'}</p>
 
                     <div className="space-y-3">
                       <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-900">
@@ -1981,6 +2444,7 @@ const CadreagoApp = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            setPreferredUserType('guest');
                             setAuthMode('login');
                             setShowAuthModal(true);
                           }}
@@ -2178,16 +2642,20 @@ const CadreagoApp = () => {
                             />
                             <div className="flex-1">
                               <div className="flex items-center justify-between">
-                                <div className="font-semibold text-gray-900 text-base flex items-center gap-2">
-                                  <span className="text-xl">{addon.icon}</span>
-                                  {addon.name}
+                                <div className="flex items-center gap-3">
+                                  <div className="w-11 h-11 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                    {renderAddonIcon(addon.icon, 18)}
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold text-gray-900 text-base">{addon.name}</div>
+                                    <p className="text-sm text-gray-600">{addon.description}</p>
+                                  </div>
                                 </div>
-                                <div className="text-blue-600 font-semibold">
+                                <div className="text-blue-600 font-semibold text-right">
                                   {formatINR(addonUnitPriceINR)}
-                                  {addon.perPerson ? ' / guest' : ''}
+                                  {addon.perPerson ? <span className="text-xs text-gray-500"> / guest</span> : ''}
                                 </div>
                               </div>
-                              <p className="text-sm text-gray-600">{addon.description}</p>
                               <p className="text-xs text-gray-500 mt-1">
                                 {addon.perPerson ? `Charged per adult (${multiplier})` : 'Charged once per stay'}
                               </p>
@@ -2208,8 +2676,22 @@ const CadreagoApp = () => {
                           const addonPriceINR = addonUnitPriceINR * multiplier;
                           return (
                             <div key={addon.id} className="flex items-center justify-between text-sm text-blue-900">
-                              <span>{addon.name}{addon.perPerson ? ` x${multiplier}` : ''}</span>
-                              <span className="font-semibold">+{formatINR(addonPriceINR)}</span>
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-full bg-white text-blue-600 flex items-center justify-center">
+                                  {renderAddonIcon(addon.icon, 16)}
+                                </div>
+                                <span>{addon.name}{addon.perPerson ? ` x${multiplier}` : ''}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold">+{formatINR(addonPriceINR)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleAddon(addon.id)}
+                                  className="text-xs text-blue-700 hover:underline"
+                                >
+                                  Remove
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -2400,11 +2882,7 @@ const CadreagoApp = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
-            <div className="flex items-center space-x-2 mb-4">
-              <span className="text-2xl font-bold text-blue-400">CADRE</span>
-              <Waves className="text-blue-400" size={24} />
-              <span className="text-2xl font-bold">AGO</span>
-            </div>
+            <img src={brandLogoDark} alt="Cadreago" className="h-10 object-contain mb-4" />
             <p className="text-gray-400 text-sm">Premium stays smart booking</p>
           </div>
 
@@ -2431,7 +2909,19 @@ const CadreagoApp = () => {
           <div>
             <h4 className="font-semibold mb-4">Partners</h4>
             <ul className="space-y-2 text-sm text-gray-400">
-              <li><a href="#" className="hover:text-white">List Your Property</a></li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreferredUserType('host');
+                    setAuthMode('signup');
+                    setShowAuthModal(true);
+                  }}
+                  className="hover:text-white"
+                >
+                  I am a Host
+                </button>
+              </li>
               <li><a href="#" className="hover:text-white">Affiliate Program</a></li>
               <li><a href="#" className="hover:text-white">Partner Portal</a></li>
             </ul>
@@ -2801,20 +3291,255 @@ const CadreagoApp = () => {
     );
   };
 
-  // Host Dashboard Component
+  const HostOnboarding = () => {
+    const [personalInfo, setPersonalInfo] = React.useState({
+      firstName: user?.name?.split(' ')[0] || '',
+      lastName: user?.name?.split(' ')[1] || '',
+      phone: '',
+      address: ''
+    });
+    const [aadhaar, setAadhaar] = React.useState({ number: '', status: 'pending' });
+    const [gstRegistered, setGstRegistered] = React.useState(false);
+    const [gst, setGst] = React.useState({ number: '', status: 'pending' });
+    const [bank, setBank] = React.useState({ account: '', ifsc: '', status: 'pending' });
+
+    const statusBadge = (status) => (
+      <span
+        className={`px-2 py-1 rounded-full text-xs font-semibold ${
+          status === 'verified'
+            ? 'bg-green-100 text-green-700'
+            : status === 'pending'
+            ? 'bg-yellow-100 text-yellow-700'
+            : 'bg-gray-100 text-gray-700'
+        }`}
+      >
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+
+    const handleVerification = (type) => {
+      if (type === 'aadhaar' && aadhaar.number.length >= 10) {
+        setAadhaar({ ...aadhaar, status: 'verified' });
+        alert('Aadhaar verification simulated via Cashfree API.');
+      } else if (type === 'gst' && gst.number.length >= 5) {
+        setGst({ ...gst, status: 'verified' });
+        alert('GST verification simulated via Cashfree API.');
+      } else if (type === 'bank' && bank.account && bank.ifsc) {
+        setBank({ ...bank, status: 'verified' });
+        alert('Bank account verification simulated via Cashfree API.');
+      } else {
+        alert('Please enter valid information before verification.');
+      }
+    };
+
+    const canComplete =
+      aadhaar.status === 'verified' &&
+      bank.status === 'verified' &&
+      (!gstRegistered || gst.status === 'verified') &&
+      personalInfo.firstName &&
+      personalInfo.phone;
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Host Onboarding</h1>
+            <p className="text-gray-600">Complete the steps below so we can verify your identity and enable payouts.</p>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Personal Details</h2>
+              <span className="text-xs text-gray-500 uppercase">Step 1</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                <input
+                  type="text"
+                  value={personalInfo.firstName}
+                  onChange={(e) => setPersonalInfo({ ...personalInfo, firstName: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="First name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                <input
+                  type="text"
+                  value={personalInfo.lastName}
+                  onChange={(e) => setPersonalInfo({ ...personalInfo, lastName: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Last name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <input
+                  type="tel"
+                  value={personalInfo.phone}
+                  onChange={(e) => setPersonalInfo({ ...personalInfo, phone: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="+91 90000 00000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <input
+                  type="text"
+                  value={personalInfo.address}
+                  onChange={(e) => setPersonalInfo({ ...personalInfo, address: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="City, State"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Aadhaar KYC</h2>
+              {statusBadge(aadhaar.status)}
+            </div>
+            <p className="text-sm text-gray-600">We’ll use Cashfree KYC APIs to verify your identity securely.</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                value={aadhaar.number}
+                onChange={(e) => setAadhaar({ ...aadhaar, number: e.target.value })}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="Aadhaar Number"
+              />
+              <button
+                type="button"
+                onClick={() => handleVerification('aadhaar')}
+                className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+              >
+                Verify via Cashfree
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">GST Details</h2>
+              {gstRegistered ? statusBadge(gst.status) : <span className="text-sm text-gray-500">Optional</span>}
+            </div>
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={gstRegistered}
+                onChange={(e) => {
+                  setGstRegistered(e.target.checked);
+                  if (!e.target.checked) {
+                    setGst({ number: '', status: 'pending' });
+                  }
+                }}
+                className="accent-blue-600"
+              />
+              <span>My business is registered under GST</span>
+            </div>
+            {gstRegistered && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <input
+                  type="text"
+                  value={gst.number}
+                  onChange={(e) => setGst({ ...gst, number: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="GSTIN"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleVerification('gst')}
+                  className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                >
+                  Verify via Cashfree
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Bank Account</h2>
+              {statusBadge(bank.status)}
+            </div>
+            <p className="text-sm text-gray-600">
+              Provide an INR bank account for payouts. We’ll verify account holder name using Cashfree Payout APIs.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                <input
+                  type="text"
+                  value={bank.account}
+                  onChange={(e) => setBank({ ...bank, account: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="XXXXXXXXXXXX"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">IFSC Code</label>
+                <input
+                  type="text"
+                  value={bank.ifsc}
+                  onChange={(e) => setBank({ ...bank, ifsc: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase"
+                  placeholder="SBIN0000000"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleVerification('bank')}
+              className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+            >
+              Verify Bank via Cashfree
+            </button>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-6 text-sm text-gray-600">
+            Cashfree will notify you once verifications are complete. You can edit these details anytime from your host dashboard.
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={!canComplete}
+              onClick={() => {
+                setHostOnboardingCompleted(true);
+                setCurrentView('host-dashboard');
+              }}
+              className={`px-6 py-3 rounded-lg font-semibold ${
+                canComplete ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              {canComplete ? 'Complete & Go to Dashboard' : 'Complete pending verifications'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const HostDashboard = () => {
-    if (!isLoggedIn || userType !== 'host') {
+    if (!isLoggedIn || userType !== 'host' || !hostOnboardingCompleted) {
       return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">Please login as a property owner</h2>
+          <h2 className="text-3xl font-bold text-gray-900 mb-4">Please complete host onboarding</h2>
           <button 
             onClick={() => {
-              setAuthMode('login');
-              setShowAuthModal(true);
+              if (!isLoggedIn) {
+                setPreferredUserType('host');
+                setAuthMode('login');
+                setShowAuthModal(true);
+              } else {
+                setCurrentView('host-onboarding');
+              }
             }}
             className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
           >
-            Login as Host
+            {isLoggedIn ? 'Resume Onboarding' : 'Login as Host'}
           </button>
         </div>
       );
@@ -2827,14 +3552,25 @@ const CadreagoApp = () => {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Host Dashboard</h1>
-            <button 
-              onClick={() => setShowAddPropertyModal(true)}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold flex items-center space-x-2"
-            >
-              <span>+ Add Property</span>
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button 
+                onClick={() => setShowAddPropertyModal(true)}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold flex items-center space-x-2"
+              >
+                <span>+ Add Property</span>
+              </button>
+              <button 
+                onClick={() => {
+                  setAddonForm({ propertyId: hostProperties[0]?.id || '', name: '', description: '', price: '' });
+                  setShowAddAddonModal(true);
+                }}
+                className="px-6 py-3 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors font-semibold flex items-center space-x-2"
+              >
+                <span>+ Create Add-on</span>
+              </button>
+            </div>
           </div>
 
           {/* Stats Overview */}
@@ -2895,6 +3631,8 @@ const CadreagoApp = () => {
                 { id: 'properties', label: 'My Properties', icon: '🏨' },
                 { id: 'bookings', label: 'Guest Bookings', icon: '📋', count: propertyBookings.filter(b => b.status === 'pending').length },
                 { id: 'revenue', label: 'Revenue', icon: '💰' },
+                { id: 'refunds', label: 'Refunds', icon: '↩️', count: hostRefunds.filter(r => r.status === 'pending').length },
+                { id: 'payouts', label: 'Payouts', icon: '💳' },
                 { id: 'reviews', label: 'Reviews', icon: '⭐' }
               ].map(tab => (
                 <button
@@ -2989,15 +3727,27 @@ const CadreagoApp = () => {
                             </div>
                           </div>
 
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
                             <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold">
                               Edit Property
                             </button>
                             <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold">
-                              View Stats
+                              View Property
                             </button>
                             <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold">
-                              Manage Rooms
+                              Manage Gallery
+                            </button>
+                            <button
+                              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold"
+                              onClick={() => {
+                                setAddonForm({ ...addonForm, propertyId: property.id });
+                                setShowAddAddonModal(true);
+                              }}
+                            >
+                              Add Add-on
+                            </button>
+                            <button className="px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm font-semibold">
+                              Deactivate
                             </button>
                           </div>
                         </div>
@@ -3124,6 +3874,95 @@ const CadreagoApp = () => {
               </div>
             )}
 
+            {/* Refunds Tab */}
+            {hostDashboardTab === 'refunds' && (
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">Refund Requests</h2>
+                <div className="space-y-4">
+                  {hostRefunds.map(refund => (
+                    <div key={refund.id} className="border rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">Booking {refund.bookingRef}</h3>
+                        <p className="text-sm text-gray-600">{refund.guestName}</p>
+                        <p className="text-xs text-gray-500">{formatDate(refund.date)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xl font-bold text-gray-900">{formatINR(convertToINR(refund.amount))}</p>
+                        <p className="text-sm text-gray-500">{refund.method}</p>
+                        <span className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold ${
+                          refund.status === 'processed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                        }`}>
+                          {refund.status.charAt(0).toUpperCase() + refund.status.slice(1)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Payouts Tab */}
+            {hostDashboardTab === 'payouts' && (
+              <div>
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">Payouts</h2>
+                    <p className="text-sm text-gray-600">Track your payout history and request new transfers.</p>
+                  </div>
+                  <button
+                    onClick={() => setShowPayoutModal(true)}
+                    className="px-5 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                  >
+                    Request Payout
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="border rounded-lg p-4">
+                    <p className="text-sm text-gray-500">Total Paid Out</p>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {formatINR(convertToINR(hostPayouts.reduce((sum, p) => sum + p.amount, 0)))}
+                    </p>
+                  </div>
+                  <div className="border rounded-lg p-4">
+                    <p className="text-sm text-gray-500">Pending Payouts</p>
+                    <p className="text-3xl font-bold text-yellow-600">
+                      {formatINR(convertToINR(hostPayouts.filter(p => p.status !== 'completed').reduce((sum, p) => sum + p.amount, 0)))}
+                    </p>
+                  </div>
+                  <div className="border rounded-lg p-4">
+                    <p className="text-sm text-gray-500">Last Payout</p>
+                    <p className="text-3xl font-bold text-gray-900">
+                      {formatINR(convertToINR(hostPayouts[0]?.amount || 0))}
+                    </p>
+                    <p className="text-sm text-gray-500">{hostPayouts[0]?.date}</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {hostPayouts.map(payout => (
+                    <div key={payout.id} className="border rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div>
+                        <p className="font-semibold text-gray-900">Reference {payout.reference}</p>
+                        <p className="text-sm text-gray-600">{payout.method}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xl font-bold text-gray-900">{formatINR(convertToINR(payout.amount))}</p>
+                        <p className="text-sm text-gray-500">{formatDate(payout.date)}</p>
+                        <span className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold ${
+                          payout.status === 'completed'
+                            ? 'bg-green-100 text-green-700'
+                            : payout.status === 'processing'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {payout.status.charAt(0).toUpperCase() + payout.status.slice(1)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Reviews Tab */}
             {hostDashboardTab === 'reviews' && (
               <div>
@@ -3204,6 +4043,33 @@ const CadreagoApp = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="City, Country"
                   />
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-gray-700">Pin on Map</label>
+                    <span className="text-xs text-gray-500">Google Maps search</span>
+                  </div>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Search property address"
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Latitude"
+                    />
+                    <input
+                      type="text"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="Longitude"
+                    />
+                  </div>
+                  <button type="button" className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm font-semibold">
+                    Use Map Picker (Coming Soon)
+                  </button>
+                  <p className="text-xs text-gray-500">We’ll use Google Maps APIs to reverse geocode the exact coordinates so your property appears in the map view.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3288,6 +4154,148 @@ const CadreagoApp = () => {
             </div>
           </div>
         )}
+        {showAddAddonModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowAddAddonModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Create Add-on</h2>
+                <button onClick={() => setShowAddAddonModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  alert('Add-on saved for host property!');
+                  setAddonForm({ propertyId: hostProperties[0]?.id || '', name: '', description: '', price: '' });
+                  setShowAddAddonModal(false);
+                }}
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Property</label>
+                  <select
+                    required
+                    value={addonForm.propertyId}
+                    onChange={(e) => setAddonForm({ ...addonForm, propertyId: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select property</option>
+                    {hostProperties.map(property => (
+                      <option key={property.id} value={property.id}>{property.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Add-on Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={addonForm.name}
+                    onChange={(e) => setAddonForm({ ...addonForm, name: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. Candlelight Dinner"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    rows="3"
+                    value={addonForm.description}
+                    onChange={(e) => setAddonForm({ ...addonForm, description: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Describe what is included"
+                  ></textarea>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Price (INR)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={addonForm.price}
+                    onChange={(e) => setAddonForm({ ...addonForm, price: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. 1200"
+                  />
+                </div>
+                <div className="flex justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAddonModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                  >
+                    Save Add-on
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+        {showPayoutModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowPayoutModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Request Payout</h2>
+                <button onClick={() => setShowPayoutModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  alert(`Payout request of ₹${payoutForm.amount || 0} submitted!`);
+                  setPayoutForm({ amount: '', notes: '' });
+                  setShowPayoutModal(false);
+                }}
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (INR)</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={payoutForm.amount}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, amount: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter amount"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <textarea
+                    rows="3"
+                    value={payoutForm.notes}
+                    onChange={(e) => setPayoutForm({ ...payoutForm, notes: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Optional message for finance team"
+                  ></textarea>
+                </div>
+                <div className="flex justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPayoutModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                  >
+                    Submit Request
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3302,6 +4310,7 @@ const CadreagoApp = () => {
         {currentView === 'details' && <HotelDetails />}
         {currentView === 'booking' && <BookingView />}
         {currentView === 'dashboard' && <Dashboard />}
+        {currentView === 'host-onboarding' && <HostOnboarding />}
         {currentView === 'host-dashboard' && <HostDashboard />}
       </div>
 
