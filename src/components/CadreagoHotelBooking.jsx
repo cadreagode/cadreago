@@ -1708,8 +1708,16 @@ const CadreagoApp = () => {
                 </div>
               </div>
 
-              {/* Map container with fixed height - sticky/floating on scroll */}
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 sticky top-4 md:top-20 lg:top-24" style={{ height: '560px' }}>
+              {/* Map container with fixed height - floats vertically with scroll */}
+              <div
+                className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300"
+                style={{
+                  height: '560px',
+                  position: 'sticky',
+                  top: 'calc(4rem + 1rem)',
+                  alignSelf: 'flex-start'
+                }}
+              >
                 {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-gray-600 bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 pointer-events-none z-10">
