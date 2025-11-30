@@ -1677,7 +1677,7 @@ const CadreagoApp = () => {
 
           {/* Map */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-md p-4">
+            <div className="bg-white rounded-lg shadow-md p-4 lg:sticky lg:top-24">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-semibold text-gray-900">Map view</h3>
@@ -1708,15 +1708,10 @@ const CadreagoApp = () => {
                 </div>
               </div>
 
-              {/* Map container with fixed height - floats vertically with scroll */}
+              {/* Map container - floats with scroll */}
               <div
                 className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300"
-                style={{
-                  height: '560px',
-                  position: 'sticky',
-                  top: 'calc(4rem + 1rem)',
-                  alignSelf: 'flex-start'
-                }}
+                style={{ height: '560px' }}
               >
                 {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
