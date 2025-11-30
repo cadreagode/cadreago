@@ -167,6 +167,7 @@ const CadreagoApp = () => {
   const googleMapsApiRef = useRef(null);
   const mapMarkersRef = useRef(new Map());
   const advancedMarkerClassRef = useRef(null);
+  const zoomUpdateTimeoutRef = useRef(null);
   const [preferredUserType, setPreferredUserType] = useState('guest');
   const [hostOnboardingCompleted, setHostOnboardingCompleted] = useState(true);
   const [showAddAddonModal, setShowAddAddonModal] = useState(false);
@@ -704,12 +705,20 @@ const CadreagoApp = () => {
       return;
     }
 
+    // Skip if map already initialized - check if map instance exists and has a valid div
+    if (googleMapRef.current?.getDiv?.()) {
+      setMapLoaded(true);
+      return;
+    }
+
     setMarkerLibraryReady(false);
 
     const initializeMap = async () => {
       try {
         const googleMaps = await loadGoogleMaps(apiKey);
-        if (!isMounted || !mapContainerRef.current) return;
+        if (!isMounted || !mapContainerRef.current) {
+          return;
+        }
 
         googleMapsApiRef.current = googleMaps;
 
@@ -754,7 +763,13 @@ const CadreagoApp = () => {
         googleMapRef.current.addListener('zoom_changed', () => {
           const currentZoom = googleMapRef.current?.getZoom();
           if (typeof currentZoom === 'number') {
-            setMapZoom(currentZoom);
+            // Throttle zoom updates to prevent excessive re-renders
+            if (zoomUpdateTimeoutRef.current) {
+              clearTimeout(zoomUpdateTimeoutRef.current);
+            }
+            zoomUpdateTimeoutRef.current = setTimeout(() => {
+              setMapZoom(currentZoom);
+            }, 100);
           }
         });
 
@@ -773,8 +788,18 @@ const CadreagoApp = () => {
 
     return () => {
       isMounted = false;
+      if (zoomUpdateTimeoutRef.current) {
+        clearTimeout(zoomUpdateTimeoutRef.current);
+      }
     };
-  }, [initialMapCenter]);
+  }, []); // Remove initialMapCenter dependency to prevent re-initialization
+
+  // Separate effect to update map center when initialMapCenter changes
+  useEffect(() => {
+    if (googleMapRef.current && mapLoaded && initialMapCenter) {
+      googleMapRef.current.panTo(initialMapCenter);
+    }
+  }, [initialMapCenter, mapLoaded]);
 
   useEffect(() => {
     if (!mapLoaded || !googleMapsApiRef.current || !googleMapRef.current) {
@@ -1965,7 +1990,7 @@ const CadreagoApp = () => {
 
           {/* Map */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-md p-4 h-full">
+            <div className="bg-white rounded-lg shadow-md p-4">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-semibold text-gray-900">Map view</h3>
@@ -1995,54 +2020,68 @@ const CadreagoApp = () => {
                   </button>
                 </div>
               </div>
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 h-[420px] md:h-[560px] lg:sticky lg:top-24">
-                <div ref={mapContainerRef} className="absolute inset-0 w-full h-full" />
 
+              {/* Map container with fixed height - property card will overlay on top */}
+              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 lg:sticky lg:top-24" style={{ height: '560px' }}>
+                {/* Map div - always rendered, never conditional */}
+                <div
+                  ref={mapContainerRef}
+                  className="absolute inset-0 w-full h-full"
+                  style={{ minHeight: '560px' }}
+                />
+
+                {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-gray-600 bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-gray-600 bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 pointer-events-none z-10">
                     <span className="font-medium">Loading Google Maps…</span>
                   </div>
                 )}
 
+                {/* Error overlay */}
                 {mapError && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 bg-white/80 backdrop-blur">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6 bg-white/80 backdrop-blur z-10">
                     <p className="font-semibold text-gray-900 mb-1">Map unavailable</p>
                     <p className="text-sm text-gray-600">{mapError}</p>
                   </div>
                 )}
 
+                {/* Property card overlay - positioned absolutely so it doesn't affect map height */}
                 {activeMapHotel && (
-                  <div className="absolute bottom-4 left-4 right-4 bg-white rounded-xl shadow-2xl p-4 flex flex-col sm:flex-row gap-4 z-20">
+                  <div className="absolute bottom-4 left-4 right-4 bg-white rounded-xl shadow-2xl p-4 flex flex-col sm:flex-row gap-4 z-30 pointer-events-auto">
                     <button
                       type="button"
                       aria-label="Close map preview"
-                      className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 transition-colors"
-                      onClick={() => setMapSelectedHotel(null)}
+                      className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 transition-colors z-40"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMapSelectedHotel(null);
+                      }}
                     >
                       <X size={18} />
                     </button>
                     <img
                       src={activeMapHotel.image}
                       alt={activeMapHotel.name}
-                      className="w-full sm:w-32 h-32 object-cover rounded-lg"
+                      className="w-full sm:w-32 h-32 object-cover rounded-lg flex-shrink-0"
                     />
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-lg font-semibold text-gray-900">{activeMapHotel.name}</h4>
-                        <div className={`px-2 py-1 rounded text-white text-sm ${getRatingColor(activeMapHotel.rating)}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <h4 className="text-lg font-semibold text-gray-900 truncate pr-2">{activeMapHotel.name}</h4>
+                        <div className={`px-2 py-1 rounded text-white text-sm flex-shrink-0 ${getRatingColor(activeMapHotel.rating)}`}>
                           {activeMapHotel.rating}
                         </div>
                       </div>
                       <p className="text-sm text-gray-500 mb-2 flex items-center">
-                        <MapPin size={14} className="mr-1" />
-                        {activeMapHotel.location}
+                        <MapPin size={14} className="mr-1 flex-shrink-0" />
+                        <span className="truncate">{activeMapHotel.location}</span>
                       </p>
-                      <p className="text-sm text-gray-600 mb-3">{activeMapHotel.description}</p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xl font-bold text-gray-900">{formatCurrency(activeMapHotel.price, activeMapHotel.currency)}</span>
+                      <p className="text-sm text-gray-600 mb-3 line-clamp-2">{activeMapHotel.description}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xl font-bold text-gray-900 flex-shrink-0">{formatCurrency(activeMapHotel.price, activeMapHotel.currency)}</span>
                         <button
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
-                          onClick={() => {
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold flex-shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSelectedHotel(activeMapHotel);
                             setCurrentView('details');
                           }}
