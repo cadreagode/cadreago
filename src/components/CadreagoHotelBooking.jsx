@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Search, Calendar, Users, Star, MapPin, Wifi, Car, Utensils, Waves, ThumbsUp, ThumbsDown, Heart, Menu, X, ChevronDown, Filter, CheckCircle, Shield, Coffee, Wind, Dumbbell, Sparkles, Share2, ChevronLeft, ChevronRight, User, Mail, Phone, CreditCard, FileText, Download } from 'lucide-react';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
+const INR_CONVERSION_RATE = 83.5; // Mock conversion USD -> INR
+const convertToINR = (amount) => amount * INR_CONVERSION_RATE;
+const formatINR = (amount) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
+    Math.round(amount)
+  );
 
 const CadreagoApp = () => {
   const [currentView, setCurrentView] = useState('search');
@@ -25,6 +31,9 @@ const CadreagoApp = () => {
   const [selectedAddons, setSelectedAddons] = useState([]);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
+  const [showMessageHostModal, setShowMessageHostModal] = useState(false);
+  const hostMessageRef = useRef(null);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [searchParams, setSearchParams] = useState({
     destination: 'Miami',
     checkIn: '2025-03-12',
@@ -295,6 +304,15 @@ const CadreagoApp = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  React.useEffect(() => {
+    if (showMessageHostModal && hostMessageRef.current) {
+      const currentValue = hostMessageRef.current.value || '';
+      const cursorPos = currentValue.length;
+      hostMessageRef.current.focus();
+      hostMessageRef.current.setSelectionRange(cursorPos, cursorPos);
+    }
+  }, [showMessageHostModal]);
 
   // Helper functions
   const incrementGuests = (type) => {
@@ -1643,6 +1661,7 @@ const CadreagoApp = () => {
   // Hotel Details
   const HotelDetails = () => {
     if (!selectedHotel) return null;
+    const nightlyRateINR = convertToINR(selectedHotel.price);
     const roomOptions = selectedHotel.roomOptions || [
       {
         id: 'standard',
@@ -1651,7 +1670,7 @@ const CadreagoApp = () => {
         bed: 'Queen Bed',
         sleeps: 'Sleeps 2',
         perks: ['City view', 'Complimentary WiFi'],
-        price: selectedHotel.price
+        priceINR: nightlyRateINR
       },
       {
         id: 'deluxe',
@@ -1660,7 +1679,7 @@ const CadreagoApp = () => {
         bed: 'King Bed',
         sleeps: 'Sleeps 3',
         perks: ['Ocean view', 'Balcony', 'Breakfast included'],
-        price: selectedHotel.price + 48
+        priceINR: convertToINR(selectedHotel.price + 48)
       },
       {
         id: 'suite',
@@ -1669,7 +1688,7 @@ const CadreagoApp = () => {
         bed: 'King Bed + Sofa',
         sleeps: 'Sleeps 4',
         perks: ['Living area', 'Butler service', 'Premium minibar'],
-        price: selectedHotel.price + 95
+        priceINR: convertToINR(selectedHotel.price + 95)
       }
     ];
     const policyDetails = selectedHotel.policyDetails || [
@@ -1795,7 +1814,7 @@ const CadreagoApp = () => {
                         </ul>
                       </div>
                       <div className="text-right">
-                        <p className="text-2xl font-bold text-gray-900">${room.price}</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatINR(room.priceINR)}</p>
                         <p className="text-xs text-gray-500">per night + taxes</p>
                       </div>
                     </div>
@@ -1885,6 +1904,27 @@ const CadreagoApp = () => {
             {/* Sidebar */}
             <div className="lg:col-span-1 order-first lg:order-last">
               <div className="space-y-4 lg:sticky lg:top-24">
+                {/* Price Card */}
+                <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
+                  <div className="border-t pt-4 md:pt-6">
+                    <div className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">
+                      {formatINR(nightlyRateINR)}
+                    </div>
+                    <div className="text-xs md:text-sm text-gray-600 mb-4">per night (approx.)</div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setShowPaymentForm(false);
+                      setCurrentView('booking');
+                    }}
+                    className="w-full px-4 md:px-6 py-3 md:py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-base md:text-lg shadow-md"
+                  >
+                    Book Now
+                    </button>
+                    <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout • Taxes calculated at payment</p>
+                  </div>
+
                 {/* Host Card */}
                 {selectedHotel.host && (
                   <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
@@ -1920,37 +1960,41 @@ const CadreagoApp = () => {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <a href={`mailto:${selectedHotel.host.email}`} className="flex items-center space-x-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
-                        <Mail size={16} />
-                        <span>{selectedHotel.host.email}</span>
-                      </a>
-                      <a href={`tel:${selectedHotel.host.phone}`} className="flex items-center space-x-2 text-sm text-gray-600 hover:text-blue-600 transition-colors">
-                        <Phone size={16} />
-                        <span>{selectedHotel.host.phone}</span>
-                      </a>
+                    <div className="space-y-3">
+                      <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-900">
+                        <p className="font-semibold mb-1">Contact host</p>
+                        <p>
+                          {isLoggedIn
+                            ? 'Have a question before booking? Send a quick message and we will connect you with the host.'
+                            : 'Login to ask questions or send a message to the host before booking.'}
+                        </p>
+                      </div>
+                      {isLoggedIn ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowMessageHostModal(true)}
+                          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                        >
+                          Message Host
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAuthMode('login');
+                            setShowAuthModal(true);
+                          }}
+                          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                        >
+                          Login to Contact Host
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
-
-                {/* Price Card */}
-                <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
-                  <div className="border-t pt-4 md:pt-6">
-                    <div className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">${selectedHotel.price}</div>
-                    <div className="text-xs md:text-sm text-gray-600 mb-4">per night</div>
-                  </div>
-
-                  <button
-                    onClick={() => setCurrentView('booking')}
-                    className="w-full px-4 md:px-6 py-3 md:py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-base md:text-lg shadow-md"
-                  >
-                    Book Now
-                  </button>
-                  <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout • Taxes calculated at payment</p>
                 </div>
               </div>
             </div>
-          </div>
         </div>
       </div>
     );
@@ -1959,11 +2003,26 @@ const CadreagoApp = () => {
   // Booking View
   const BookingView = () => {
     if (!selectedHotel) return null;
-    const addonsTotal = calculateAddonsTotal();
-    const subtotal = selectedHotel.price + addonsTotal;
-    const gstAmount = +(subtotal * GST_RATE).toFixed(2);
-    const bookingTotal = +(subtotal + gstAmount).toFixed(2);
+    const nightlyRateINR = convertToINR(selectedHotel.price);
+    const addonsTotalINR = convertToINR(calculateAddonsTotal());
+    const subtotalINR = nightlyRateINR + addonsTotalINR;
+    const gstAmount = Math.round(subtotalINR * GST_RATE);
+    const bookingTotalINR = subtotalINR + gstAmount;
     const selectedAddonDetails = availableAddons.filter(addon => selectedAddons.includes(addon.id));
+    const handleBookingSubmit = (e) => {
+      e.preventDefault();
+      setShowPaymentForm(true);
+      setTimeout(() => {
+        const section = document.getElementById('payment-section');
+        if (section) {
+          section.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+    };
+    const handlePaymentSubmit = (e) => {
+      e.preventDefault();
+      alert('Redirecting to the secure payment gateway to complete your booking.');
+    };
 
     return (
       <div className="bg-gray-50 min-h-screen">
@@ -2023,7 +2082,7 @@ const CadreagoApp = () => {
               <div className="bg-white rounded-lg shadow-md p-8">
                 <h2 className="text-3xl font-bold text-gray-900 mb-6">Fill in your details</h2>
 
-                <form className="space-y-6">
+                <form className="space-y-6" onSubmit={handleBookingSubmit}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
@@ -2103,6 +2162,7 @@ const CadreagoApp = () => {
                       {availableAddons.map(addon => {
                         const isSelected = selectedAddons.includes(addon.id);
                         const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
+                        const addonUnitPriceINR = convertToINR(addon.price);
                         return (
                           <label
                             key={addon.id}
@@ -2123,7 +2183,8 @@ const CadreagoApp = () => {
                                   {addon.name}
                                 </div>
                                 <div className="text-blue-600 font-semibold">
-                                  ${addon.price}{addon.perPerson ? ' / guest' : ''}
+                                  {formatINR(addonUnitPriceINR)}
+                                  {addon.perPerson ? ' / guest' : ''}
                                 </div>
                               </div>
                               <p className="text-sm text-gray-600">{addon.description}</p>
@@ -2143,11 +2204,12 @@ const CadreagoApp = () => {
                       <div className="space-y-2">
                         {selectedAddonDetails.map(addon => {
                           const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
-                          const addonPrice = addon.price * multiplier;
+                          const addonUnitPriceINR = convertToINR(addon.price);
+                          const addonPriceINR = addonUnitPriceINR * multiplier;
                           return (
                             <div key={addon.id} className="flex items-center justify-between text-sm text-blue-900">
                               <span>{addon.name}{addon.perPerson ? ` x${multiplier}` : ''}</span>
-                              <span className="font-semibold">+${addonPrice}</span>
+                              <span className="font-semibold">+{formatINR(addonPriceINR)}</span>
                             </div>
                           );
                         })}
@@ -2158,21 +2220,21 @@ const CadreagoApp = () => {
                   <div className="pt-6 border-t space-y-3">
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Room rate</span>
-                      <span className="font-semibold text-gray-900">${selectedHotel.price.toFixed(2)}</span>
+                      <span className="font-semibold text-gray-900">{formatINR(nightlyRateINR)}</span>
                     </div>
-                    {addonsTotal > 0 && (
+                    {addonsTotalINR > 0 && (
                       <div className="flex justify-between text-sm text-blue-700">
                         <span>Add-ons</span>
-                        <span className="font-semibold">+${addonsTotal.toFixed(2)}</span>
+                        <span className="font-semibold">+{formatINR(addonsTotalINR)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Subtotal</span>
-                      <span className="font-semibold text-gray-900">${subtotal.toFixed(2)}</span>
+                      <span className="font-semibold text-gray-900">{formatINR(subtotalINR)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>GST ({(GST_RATE * 100).toFixed(0)}%)</span>
-                      <span className="font-semibold text-gray-900">+${gstAmount.toFixed(2)}</span>
+                      <span className="font-semibold text-gray-900">+{formatINR(gstAmount)}</span>
                     </div>
                     <div className="flex justify-between items-center pt-4 border-t">
                       <div>
@@ -2181,7 +2243,7 @@ const CadreagoApp = () => {
                           Includes taxes and {selectedAddonDetails.length > 0 ? 'selected add-ons' : 'standard inclusions'}
                         </p>
                       </div>
-                      <span className="text-4xl font-bold text-blue-600">${bookingTotal.toFixed(2)}</span>
+                      <span className="text-4xl font-bold text-blue-600">{formatINR(bookingTotalINR)}</span>
                     </div>
 
                     <button 
@@ -2192,8 +2254,140 @@ const CadreagoApp = () => {
                     </button>
                   </div>
                 </form>
+
+                {showPaymentForm && (
+                  <div id="payment-section" className="mt-10 border-t pt-8">
+                    <h3 className="text-2xl font-bold text-gray-900 mb-4">Payment Details</h3>
+                    <p className="text-sm text-gray-600 mb-6">
+                      Your total payable amount is <span className="font-semibold text-gray-900">{formatINR(bookingTotalINR)}</span>.
+                      Enter your payment details to confirm and navigate to the payment gateway.
+                    </p>
+                    <form className="space-y-5" onSubmit={handlePaymentSubmit}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Cardholder Name</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Name on card"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Card Number</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          maxLength={19}
+                          placeholder="1234 5678 9012 3456"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Expiry Month</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            required
+                            maxLength={2}
+                            placeholder="MM"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Expiry Year</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            required
+                            maxLength={4}
+                            placeholder="YYYY"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">CVV</label>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            required
+                            maxLength={4}
+                            placeholder="123"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-900">
+                        <p className="font-semibold mb-1">Secure payment</p>
+                        <p>We will redirect you to your bank's secure payment gateway to complete your booking.</p>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full px-6 py-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-semibold text-lg shadow-lg"
+                      >
+                        Pay &amp; Confirm Booking
+                      </button>
+                    </form>
+                  </div>
+                )}
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const HostMessageModal = () => {
+    if (!showMessageHostModal || !selectedHotel?.host) return null;
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">Message {selectedHotel.host.name}</h3>
+              <p className="text-sm text-gray-600">Ask anything about the stay before you confirm.</p>
+            </div>
+            <button onClick={() => setShowMessageHostModal(false)} className="text-gray-500 hover:text-gray-700">
+              <X size={20} />
+            </button>
+          </div>
+          <textarea
+            ref={hostMessageRef}
+            className="w-full h-32 border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            placeholder="Hi, I would like to know more about..."
+          />
+         <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (hostMessageRef.current) {
+                  hostMessageRef.current.value = '';
+                }
+                setShowMessageHostModal(false);
+              }}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const message = hostMessageRef.current?.value?.trim();
+                if (!message) {
+                  alert('Please enter a message before sending.');
+                  if (hostMessageRef.current) hostMessageRef.current.focus();
+                  return;
+                }
+                alert('Message sent to host!');
+                hostMessageRef.current.value = '';
+                setShowMessageHostModal(false);
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Send Message
+            </button>
           </div>
         </div>
       </div>
@@ -3118,6 +3312,7 @@ const CadreagoApp = () => {
       <AuthModal />
       <ShareModal />
       <ImageGalleryModal />
+      <HostMessageModal />
     </div>
   );
 };
