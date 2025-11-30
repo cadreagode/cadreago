@@ -697,6 +697,7 @@ const CadreagoApp = () => {
   useEffect(() => {
     let isMounted = true;
     const apiKey = process.env.REACT_APP_GOOGLE_MAPS_KEY;
+    const mapId = process.env.REACT_APP_GOOGLE_MAPS_MAP_ID;
 
     if (!apiKey) {
       setMapError('Add REACT_APP_GOOGLE_MAPS_KEY to your .env.local file to enable Google Maps.');
@@ -715,26 +716,40 @@ const CadreagoApp = () => {
         // Access Map constructor from google.maps namespace
         const { Map } = window.google.maps;
 
-        // Create map without mapId - this allows legacy markers to work
-        // AdvancedMarkerElement requires a valid mapId from Google Cloud Console
-        googleMapRef.current = new Map(mapContainerRef.current, {
+        // Map configuration
+        const mapConfig = {
           center: initialMapCenter,
           zoom: 6,
           gestureHandling: 'greedy',
           disableDefaultUI: true,
           zoomControl: true
-        });
+        };
+
+        // Add Map ID if available (required for AdvancedMarkerElement)
+        if (mapId) {
+          mapConfig.mapId = mapId;
+        }
+
+        googleMapRef.current = new Map(mapContainerRef.current, mapConfig);
 
         // Check for advanced markers support
-        // Note: AdvancedMarkerElement requires a valid mapId from Cloud Console
-        // For now, we'll use legacy markers which work without mapId
         const markerLib = window.google.maps.marker;
         const { AdvancedMarkerElement } = markerLib || {};
 
-        // Only use AdvancedMarkerElement if we have a valid mapId
-        // For now, we'll use legacy markers
-        advancedMarkerClassRef.current = null;
-        setMarkerLibraryReady(false);
+        // Use AdvancedMarkerElement if available and we have a Map ID
+        if (AdvancedMarkerElement && mapId) {
+          advancedMarkerClassRef.current = AdvancedMarkerElement;
+          setMarkerLibraryReady(true);
+          console.log('✓ Using AdvancedMarkerElement (modern markers)');
+        } else {
+          advancedMarkerClassRef.current = null;
+          setMarkerLibraryReady(false);
+          if (!mapId) {
+            console.log('ℹ Using legacy markers (no Map ID provided). Add REACT_APP_GOOGLE_MAPS_MAP_ID to .env.local to enable AdvancedMarkerElement.');
+          } else {
+            console.warn('⚠ AdvancedMarkerElement not available, falling back to legacy markers');
+          }
+        }
 
         googleMapRef.current.addListener('zoom_changed', () => {
           const currentZoom = googleMapRef.current?.getZoom();

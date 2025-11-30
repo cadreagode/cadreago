@@ -46,65 +46,69 @@
 - ✅ Click handlers
 - ⚠️ AdvancedMarkerElement (requires Map ID - see below)
 
-## How to Enable AdvancedMarkerElement (Optional)
+## How to Enable AdvancedMarkerElement (Recommended)
 
-AdvancedMarkerElement is the new, more performant marker system from Google. To enable it:
+AdvancedMarkerElement is the new, more performant marker system from Google. The code is already set up to use it - you just need to create a Map ID and add it to your environment.
 
-### Step 1: Create a Map ID
-1. Go to [Google Cloud Console](https://console.cloud.google.com/google/maps-apis/studio/maps)
-2. Select your project (the one with your API key)
-3. Click "Create Map ID"
-4. Choose "JavaScript" as the map type
-5. Give it a name (e.g., "Cadreago Hotels Map")
-6. Click "Save"
-7. Copy the Map ID (format: `abc123def456`)
+### Step 1: Create a Map ID in Google Cloud Console
 
-### Step 2: Update the Code
-Edit [src/components/CadreagoHotelBooking.jsx](src/components/CadreagoHotelBooking.jsx:720-726):
+1. **Go to Map Management:**
+   - Visit [Google Cloud Console - Map Management](https://console.cloud.google.com/google/maps-apis/studio/maps)
+   - Make sure you're in the same project as your API key
 
-```javascript
-// Replace this:
-googleMapRef.current = new Map(mapContainerRef.current, {
-  center: initialMapCenter,
-  zoom: 6,
-  gestureHandling: 'greedy',
-  disableDefaultUI: true,
-  zoomControl: true
-});
+2. **Create a New Map ID:**
+   - Click **"Create Map ID"** button
+   - Fill in the form:
+     - **Map Name:** `Cadreago Hotels Map` (or any name you prefer)
+     - **Map Type:** Select **"JavaScript"**
+     - **Description:** (optional) `Hotel booking map with custom price markers`
+   - Click **"Save"**
 
-// With this:
-googleMapRef.current = new Map(mapContainerRef.current, {
-  center: initialMapCenter,
-  zoom: 6,
-  gestureHandling: 'greedy',
-  disableDefaultUI: true,
-  zoomControl: true,
-  mapId: 'YOUR_MAP_ID_HERE' // Add your Map ID
-});
-```
+3. **Copy Your Map ID:**
+   - After creation, you'll see your Map ID (format: `abc123def456` or similar)
+   - Copy this ID
 
-Then update the marker initialization (around line 736):
+### Step 2: Add Map ID to Your Environment
 
-```javascript
-// Replace:
-advancedMarkerClassRef.current = null;
-setMarkerLibraryReady(false);
+1. **Open `.env.local` file** in your project root
+2. **Add this line:**
+   ```bash
+   REACT_APP_GOOGLE_MAPS_MAP_ID=your_map_id_here
+   ```
+3. **Replace `your_map_id_here`** with the Map ID you copied
 
-// With:
-const markerLib = window.google.maps.marker;
-const { AdvancedMarkerElement } = markerLib || {};
-advancedMarkerClassRef.current = AdvancedMarkerElement || null;
-setMarkerLibraryReady(Boolean(AdvancedMarkerElement));
-
-if (!AdvancedMarkerElement) {
-  console.warn('AdvancedMarkerElement not available, using legacy markers');
-}
-```
-
-### Step 3: Rebuild
+Example `.env.local`:
 ```bash
-npm run build
+REACT_APP_GOOGLE_MAPS_KEY=AIzaSyBOvO8-gKV7fCxv2mfV3nlD0orHU87xDX0
+REACT_APP_GOOGLE_MAPS_MAP_ID=abc123def456
+REACT_APP_SUPABASE_URL=https://yourproject.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=your_anon_key_here
 ```
+
+### Step 3: Rebuild and Test
+
+```bash
+# Rebuild the application
+npm run build
+
+# Start the dev server (or refresh if already running)
+npm start
+```
+
+### Step 4: Verify It's Working
+
+Open browser console and look for:
+- ✅ **"✓ Using AdvancedMarkerElement (modern markers)"** - Success!
+- ⚠️ **"ℹ Using legacy markers (no Map ID provided)"** - Map ID not configured
+- ❌ **"⚠ AdvancedMarkerElement not available"** - Map ID may be invalid
+
+### What You'll Get with AdvancedMarkerElement
+
+✅ **Better Performance** - Optimized rendering for many markers
+✅ **No Deprecation Warning** - Uses the modern API
+✅ **Custom HTML Content** - Beautiful price markers (already implemented)
+✅ **Better Mobile Performance** - Touch-optimized interactions
+✅ **Future-Proof** - Google's recommended approach
 
 ## API Key Security
 
