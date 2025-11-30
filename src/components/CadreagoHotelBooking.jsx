@@ -4,14 +4,30 @@ import brandLogo from '../assets/logo.png';
 import brandIcon from '../assets/logo_icon.png';
 import brandLogoDark from '../assets/logo_non-transperant.png';
 import { loadGoogleMaps } from '../lib/loadGoogleMaps';
+import { fetchHotels, fetchHotelsByHost } from '../services/hotelService';
+import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus } from '../services/bookingService';
+import { signIn, signUp, signOut, getCurrentUser } from '../services/authService';
+import { fetchUserPayments } from '../services/paymentService';
+import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
-const INR_CONVERSION_RATE = 83.5; // Mock conversion USD -> INR
-const convertToINR = (amount) => amount * INR_CONVERSION_RATE;
-const formatINR = (amount) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(
-    Math.round(amount)
-  );
+const formatCurrency = (amount, currency = 'INR') => {
+  const currencyConfig = {
+    'INR': { locale: 'en-IN', minFractionDigits: 0, maxFractionDigits: 0 },
+    'USD': { locale: 'en-US', minFractionDigits: 0, maxFractionDigits: 0 },
+    'EUR': { locale: 'de-DE', minFractionDigits: 0, maxFractionDigits: 0 },
+    'GBP': { locale: 'en-GB', minFractionDigits: 0, maxFractionDigits: 0 }
+  };
+
+  const config = currencyConfig[currency] || currencyConfig['INR'];
+
+  return new Intl.NumberFormat(config.locale, {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: config.minFractionDigits,
+    maximumFractionDigits: config.maxFractionDigits
+  }).format(Math.round(amount));
+};
 const addonIconMap = {
   Coffee,
   Car,
@@ -171,6 +187,12 @@ const CadreagoApp = () => {
     adults: 2,
     children: 0
   });
+  const [hotels, setHotels] = useState([]);
+  const [hotelsLoading, setHotelsLoading] = useState(true);
+  const [userBookingsData, setUserBookingsData] = useState([]);
+  const [hostBookingsData, setHostBookingsData] = useState([]);
+  const [paymentsData, setPaymentsData] = useState([]);
+  const [favoritesData, setFavoritesData] = useState([]);
 
   const popularDestinations = [
     'Miami', 'Ibiza', 'New York', 'Paris', 'London', 
@@ -182,45 +204,8 @@ const CadreagoApp = () => {
     dest.toLowerCase().includes(searchParams.destination.toLowerCase())
   );
 
-  // Mock user bookings
-  const userBookings = [
-    {
-      id: 1,
-      hotelName: 'Bella Vista Resort',
-      location: 'Kochi, Kerala',
-      checkIn: '2025-04-15',
-      checkOut: '2025-04-20',
-      guests: '2 Adults',
-      totalPrice: 280,
-      status: 'confirmed',
-      bookingRef: 'CAD001234',
-      image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=400&h=300&fit=crop'
-    },
-    {
-      id: 2,
-      hotelName: 'Island Palace Hotel',
-      location: 'Ibiza',
-      checkIn: '2025-05-10',
-      checkOut: '2025-05-15',
-      guests: '2 Adults, 1 Child',
-      totalPrice: 900,
-      status: 'pending',
-      bookingRef: 'CAD001235',
-      image: 'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=400&h=300&fit=crop'
-    },
-    {
-      id: 3,
-      hotelName: 'Pandora Guesthouse',
-      location: 'Miami',
-      checkIn: '2025-03-01',
-      checkOut: '2025-03-05',
-      guests: '2 Adults',
-      totalPrice: 480,
-      status: 'completed',
-      bookingRef: 'CAD001230',
-      image: 'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=400&h=300&fit=crop'
-    }
-  ];
+  // Use Supabase data for user bookings (loaded in loadUserData function)
+  const userBookings = userBookingsData;
 
   // Mock messages
   const userMessages = [
@@ -242,36 +227,8 @@ const CadreagoApp = () => {
     }
   ];
 
-  // Mock payment history
-  const paymentHistory = [
-    {
-      id: 1,
-      date: '2025-03-01',
-      description: 'Bella Vista Resort - Booking #CAD001234',
-      amount: 280,
-      status: 'completed',
-      method: 'Visa •••• 4242',
-      invoiceUrl: '#'
-    },
-    {
-      id: 2,
-      date: '2025-02-15',
-      description: 'Pandora Guesthouse - Booking #CAD001230',
-      amount: 480,
-      status: 'completed',
-      method: 'Mastercard •••• 8888',
-      invoiceUrl: '#'
-    },
-    {
-      id: 3,
-      date: '2025-01-20',
-      description: 'Island Palace Hotel - Refund',
-      amount: -150,
-      status: 'refunded',
-      method: 'Visa •••• 4242',
-      invoiceUrl: '#'
-    }
-  ];
+  // Use Supabase data for payment history (loaded in loadUserData function)
+  const paymentHistory = paymentsData;
 
   // Available add-ons
   const availableAddons = [
@@ -570,45 +527,84 @@ const CadreagoApp = () => {
     }
   };
 
-  // Authentication functions
-  const handleLogin = (email, password, type = 'guest') => {
-    // Mock login - in real app, this would call an API
-    setUser({
-      name: type === 'host' ? 'Hotel Owner' : 'Jane Marie Doe',
-      email: email,
-      avatar: type === 'host' ? 'HO' : 'JD'
-    });
-    setIsLoggedIn(true);
-    setUserType(type);
-    setShowAuthModal(false);
-    const destination = type === 'host'
-      ? (hostOnboardingCompleted ? 'host-dashboard' : 'host-onboarding')
-      : 'dashboard';
-    setCurrentView(destination); // Navigate based on user type
+  // Load user-specific data after login
+  const loadUserData = async (userId) => {
+    // Load bookings
+    const { data: bookings } = await fetchUserBookings(userId);
+    if (bookings) setUserBookingsData(bookings);
+
+    // Load favorites
+    const { data: favs } = await fetchUserFavorites(userId);
+    if (favs) setFavoritesData(favs.map(f => f.hotel_id));
+
+    // Load payments
+    const { data: payments } = await fetchUserPayments(userId);
+    if (payments) setPaymentsData(payments);
   };
 
-  const handleSignup = (name, email, password, type = 'guest') => {
-    // Mock signup - in real app, this would call an API
-    setUser({
-      name: name,
-      email: email,
-      avatar: name.split(' ').map(n => n[0]).join('')
-    });
-    setIsLoggedIn(true);
-    setUserType(type);
-    setShowAuthModal(false);
-    if (type === 'host') {
-      setHostOnboardingCompleted(false);
-      setCurrentView('host-onboarding');
-    } else {
-      setCurrentView('dashboard');
+  // Authentication functions
+  const handleLogin = async (email, password, type = 'guest') => {
+    const { data, error } = await signIn(email, password);
+    if (error) {
+      alert('Login failed: ' + error);
+      return;
+    }
+
+    if (data?.user) {
+      const userName = data.user.user_metadata?.full_name || data.user.email.split('@')[0];
+      setUser({
+        id: data.user.id,
+        name: userName,
+        email: data.user.email,
+        avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
+      });
+      setIsLoggedIn(true);
+      setUserType(type);
+      setShowAuthModal(false);
+      const destination = type === 'host'
+        ? (hostOnboardingCompleted ? 'host-dashboard' : 'host-onboarding')
+        : 'dashboard';
+      setCurrentView(destination);
+
+      // Load user-specific data
+      await loadUserData(data.user.id);
     }
   };
 
-  const handleLogout = () => {
+  const handleSignup = async (name, email, password, type = 'guest') => {
+    const { data, error } = await signUp(email, password, { full_name: name, user_type: type });
+    if (error) {
+      alert('Signup failed: ' + error);
+      return;
+    }
+
+    if (data?.user) {
+      setUser({
+        id: data.user.id,
+        name: name,
+        email: email,
+        avatar: name.split(' ').map(n => n[0]).join('').toUpperCase()
+      });
+      setIsLoggedIn(true);
+      setUserType(type);
+      setShowAuthModal(false);
+      if (type === 'host') {
+        setHostOnboardingCompleted(false);
+        setCurrentView('host-onboarding');
+      } else {
+        setCurrentView('dashboard');
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
     setIsLoggedIn(false);
     setUser(null);
     setUserType('guest');
+    setUserBookingsData([]);
+    setFavoritesData([]);
+    setPaymentsData([]);
     setCurrentView('search');
   };
   const [filters, setFilters] = useState({
@@ -618,201 +614,74 @@ const CadreagoApp = () => {
     amenities: []
   });
 
-  const hotels = React.useMemo(() => ([
-    {
-      id: 1,
-      name: 'Bella Vista Resort',
-      stars: 3,
-      location: 'Miami',
-      rating: 7.5,
-      ratingText: 'Good',
-      reviews: 174,
-      price: 56,
-      image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=800&h=600&fit=crop',
-      images: [
-        'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=800&h=600&fit=crop',
-        'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&h=600&fit=crop',
-        'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=800&h=600&fit=crop',
-        'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&h=600&fit=crop'
-      ],
-      amenities: ['Pool', 'Spa', 'Parking', 'WiFi'],
-      address: 'Fort Kochi Beach Road, Kerala 682001, India',
-      coordinates: { lat: 9.9312, lng: 76.2673 },
-      description: 'Experience backwater luxury at Bella Vista Resort with curated Ayurvedic spa rituals, lagoon pools, and coastal dining.',
-      services: {
-        reception: true,
-        tv: true,
-        luggage: true,
-        restaurant: true,
-        bath: true,
-        accessibility: true,
-        laundry: true,
-        cafeBar: true,
-        safe: true,
-        garden: true
-      },
-      reviewScores: {
-        cleanliness: 8.2,
-        location: 8.5,
-        transfers: 7.8,
-        facilities: 8.0,
-        staff: 7.5,
-        accessibility: 9.2,
-        comfort: 8.3,
-        wifi: 8.7,
-        foodDrinks: 7.9
-      },
-      userReviews: [
-        {
-          id: 1,
-          name: 'Lorem ipsum dolor sit',
-          date: 'August 9, 2023',
-          rating: 9.2,
-          avatar: 'https://i.pravatar.cc/150?img=1',
-          positive: 'Lorem ipsum dolor sit amet consectetur adipisicing elit. Commodi, ratione debitis quis est labore voluptatibus! Eaque cupiditate minima, at placeat totam, magni doloremque veniam neque...',
-          negative: 'Lorem ipsum dolor sit amet consectetur adipisicing elit. Commodi, ratione debitis quis est labore voluptatibus! Eaque cupiditate minima, at placeat totam, magni doloremque veniam neque...'
-        }
-      ],
-      host: {
-        name: 'Malini Varma',
-        avatar: 'MV',
-        properties: 3,
-        memberSince: '2020',
-        bio: 'Heritage host curating soulful stays across God’s Own Country.',
-        verified: true,
-        languages: ['English', 'Malayalam', 'Hindi'],
-        email: 'malini@bellavista.in',
-        phone: '+91 80750 12345'
-      },
-      addons: [
-        { id: 'breakfast', name: 'Breakfast', description: 'Continental breakfast for 2', price: 25, icon: 'Coffee' },
-        { id: 'airport', name: 'Airport Transfer', description: 'Round trip airport pickup', price: 50, icon: 'Car' },
-        { id: 'spa', name: 'Spa Package', description: 'Couples massage & spa access', price: 120, icon: 'Sparkles' },
-        { id: 'late-checkout', name: 'Late Checkout', description: 'Checkout until 6 PM', price: 30, icon: 'Calendar' }
-      ]
-    },
-    {
-      id: 2,
-      name: 'Bambu Indah',
-      stars: 3,
-      location: 'South Goa, Goa',
-      rating: 6.2,
-      ratingText: 'Pleasant',
-      reviews: 147,
-      price: 170,
-      image: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&h=600&fit=crop',
-      images: ['https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&h=600&fit=crop'],
-      amenities: ['Pool', 'Parking', 'Elevator', 'WiFi'],
-      ecoFriendly: true,
-      address: 'Palolem Beach Road, Canacona, Goa 403702, India',
-      coordinates: { lat: 15.0099, lng: 74.0237 },
-      description: 'Sustainable luxury amidst coconut groves with private plunge pools, vegan breakfasts, and curated surf lessons.',
-      services: { reception: true, tv: true },
-      reviewScores: { cleanliness: 7.5, location: 8.0 },
-      userReviews: [],
-      host: {
-        name: 'Raghav Menon',
-        avatar: 'RM',
-        properties: 1,
-        memberSince: '2022',
-        bio: 'Former travel photographer hosting eco chic villas in Goa.',
-        verified: true,
-        languages: ['English', 'Hindi', 'Konkani'],
-        email: 'raghav@bambuindah.in',
-        phone: '+91 88844 56780'
-      },
-      addons: [
-        { id: 'breakfast', name: 'Organic Breakfast', description: 'Farm-to-table breakfast', price: 30, icon: 'Coffee' },
-        { id: 'bike', name: 'Bike Rental', description: 'Mountain bike for the day', price: 20, icon: 'Wind' },
-        { id: 'yoga', name: 'Yoga Session', description: 'Private yoga class', price: 45, icon: 'Dumbbell' }
-      ]
-    },
-    {
-      id: 3,
-      name: 'Pandora Guesthouse',
-      stars: 5,
-      location: 'Udaipur, Rajasthan',
-      rating: 9.6,
-      ratingText: 'Wonderful',
-      reviews: 241,
-      price: 120,
-      image: 'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=800&h=600&fit=crop',
-      images: ['https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=800&h=600&fit=crop'],
-      amenities: ['Parking', 'Elevator'],
-      ecoFriendly: true,
-      address: 'Lake Pichola Road, Udaipur 313001, India',
-      coordinates: { lat: 24.5854, lng: 73.7125 },
-      description: 'Charming haveli with marble courtyards, rooftop ghazals, and curated city palace tours.',
-      services: { reception: true },
-      reviewScores: { cleanliness: 9.5 },
-      userReviews: [],
-      host: {
-        name: 'Saanvi Kapoor',
-        avatar: 'SK',
-        properties: 5,
-        memberSince: '2019',
-        bio: 'Heritage curator bringing royal Rajasthan experiences to modern travellers.',
-        verified: true,
-        languages: ['English', 'Hindi'],
-        email: 'saanvi@pandoraguesthouse.in',
-        phone: '+91 90040 88990'
-      },
-      addons: [
-        { id: 'breakfast', name: 'Gourmet Breakfast', description: 'Chef-prepared breakfast', price: 35, icon: 'Coffee' },
-        { id: 'wine-tasting', name: 'Wine Tasting', description: 'Premium wine selection', price: 60, icon: 'Utensils' },
-        { id: 'tour', name: 'City Tour', description: 'Guided city tour', price: 40, icon: 'MapPin' }
-      ]
-    },
-    {
-      id: 5,
-      name: 'Island Palace Hotel',
-      stars: 4,
-      location: 'Andaman Islands',
-      rating: 9.2,
-      ratingText: 'Wonderful',
-      reviews: 241,
-      price: 180,
-      image: 'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&h=600&fit=crop',
-      images: ['https://images.unsplash.com/photo-1578683010236-d716f9a3f461?w=800&h=600&fit=crop'],
-      amenities: ['Pool', 'Spa', 'Parking', 'Elevator', 'WiFi'],
-      limitedDeal: true,
-      freeCancellation: true,
-      roomsLeft: 1,
-      address: 'Radhanagar Beach, Havelock Island, Andaman 744211, India',
-      coordinates: { lat: 11.9634, lng: 92.9873 },
-      description: 'Stunning island views with private scuba experiences, sandbar dinners, and rainforest spa journeys.',
-      services: { reception: true, tv: true },
-      reviewScores: { cleanliness: 9.0 },
-      userReviews: [],
-      host: {
-        name: 'Aditi Rao',
-        avatar: 'AR',
-        properties: 2,
-        memberSince: '2021',
-        bio: 'Island host crafting eco-luxury trails across the Indian Ocean.',
-        verified: true,
-        languages: ['English', 'Hindi', 'Tamil'],
-        email: 'aditi@islandpalace.in',
-        phone: '+91 96000 44567'
-      },
-      addons: [
-        { id: 'breakfast', name: 'Beachfront Breakfast', description: 'Breakfast with ocean view', price: 28, icon: 'Coffee' },
-        { id: 'boat', name: 'Boat Trip', description: 'Private boat excursion', price: 150, icon: 'Waves' },
-        { id: 'spa', name: 'Luxury Spa', description: 'Full spa treatment', price: 180, icon: 'Sparkles' },
-        { id: 'champagne', name: 'Champagne Package', description: 'Premium champagne on arrival', price: 75, icon: 'Utensils' }
-      ]
-    }
-  ]), []);
+  // Check for existing user session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data } = await getCurrentUser();
+      if (data?.user) {
+        const userName = data.user.user_metadata?.full_name || data.user.email.split('@')[0];
+        setUser({
+          id: data.user.id,
+          name: userName,
+          email: data.user.email,
+          avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
+        });
+        setIsLoggedIn(true);
+        setUserType(data.user.user_metadata?.user_type || 'guest');
+
+        // Load user data
+        await loadUserData(data.user.id);
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  // Fetch hotels from Supabase on component mount
+  useEffect(() => {
+    const loadHotels = async () => {
+      setHotelsLoading(true);
+      const { data, error } = await fetchHotels();
+      if (!error && data) {
+        setHotels(data);
+      } else {
+        console.error('Error loading hotels:', error);
+        setHotels([]); // Set empty array on error
+      }
+      setHotelsLoading(false);
+    };
+
+    loadHotels();
+  }, []);
 
   const initialMapCenter = React.useMemo(() => {
     const withCoordinates = hotels.find(hotel => hotel.coordinates);
     return withCoordinates?.coordinates || { lat: 20.5937, lng: 78.9629 };
   }, [hotels]);
 
-  const toggleFavorite = (hotelId) => {
-    setFavorites(prev => 
-      prev.includes(hotelId) ? prev.filter(id => id !== hotelId) : [...prev, hotelId]
-    );
+  const toggleFavorite = async (hotelId) => {
+    if (!isLoggedIn || !user?.id) {
+      alert('Please log in to add favorites');
+      return;
+    }
+
+    const isFavorited = favoritesData.includes(hotelId);
+
+    if (isFavorited) {
+      // Remove from favorites
+      const { error } = await removeFromFavorites(user.id, hotelId);
+      if (!error) {
+        setFavoritesData(prev => prev.filter(id => id !== hotelId));
+        setFavorites(prev => prev.filter(id => id !== hotelId));
+      }
+    } else {
+      // Add to favorites
+      const { error } = await addToFavorites(user.id, hotelId);
+      if (!error) {
+        setFavoritesData(prev => [...prev, hotelId]);
+        setFavorites(prev => [...prev, hotelId]);
+      }
+    }
   };
 
   const getRatingColor = (rating) => {
@@ -843,23 +712,29 @@ const CadreagoApp = () => {
 
         googleMapsApiRef.current = googleMaps;
 
-        // The loadGoogleMaps now ensures libraries are loaded
         // Access Map constructor from google.maps namespace
         const { Map } = window.google.maps;
 
+        // Create map without mapId - this allows legacy markers to work
+        // AdvancedMarkerElement requires a valid mapId from Google Cloud Console
         googleMapRef.current = new Map(mapContainerRef.current, {
           center: initialMapCenter,
           zoom: 6,
           gestureHandling: 'greedy',
           disableDefaultUI: true,
-          zoomControl: true,
-          mapId: 'DEMO_MAP_ID' // Required for advanced markers
+          zoomControl: true
         });
 
         // Check for advanced markers support
-        const { AdvancedMarkerElement } = window.google.maps.marker || {};
-        advancedMarkerClassRef.current = AdvancedMarkerElement || null;
-        setMarkerLibraryReady(Boolean(advancedMarkerClassRef.current));
+        // Note: AdvancedMarkerElement requires a valid mapId from Cloud Console
+        // For now, we'll use legacy markers which work without mapId
+        const markerLib = window.google.maps.marker;
+        const { AdvancedMarkerElement } = markerLib || {};
+
+        // Only use AdvancedMarkerElement if we have a valid mapId
+        // For now, we'll use legacy markers
+        advancedMarkerClassRef.current = null;
+        setMarkerLibraryReady(false);
 
         googleMapRef.current.addListener('zoom_changed', () => {
           const currentZoom = googleMapRef.current?.getZoom();
@@ -872,6 +747,7 @@ const CadreagoApp = () => {
         setMapError('');
         setMapLoaded(true);
       } catch (error) {
+        console.error('Map initialization error:', error);
         if (isMounted) {
           setMapError(error.message);
         }
@@ -894,24 +770,35 @@ const CadreagoApp = () => {
     const markerStore = mapMarkersRef.current;
     const AdvancedMarkerElement = advancedMarkerClassRef.current;
 
-    markerStore.forEach(({ marker, cleanup }) => {
-      if (typeof cleanup === 'function') {
-        cleanup();
-      }
-      if (!marker) return;
-      if (typeof marker.setMap === 'function') {
-        marker.setMap(null);
-      } else {
-        marker.map = null;
+    // Track which hotel IDs we need markers for
+    const currentHotelIds = new Set(hotels.map(h => h.id).filter(Boolean));
+
+    // Remove markers for hotels that no longer exist
+    markerStore.forEach(({ marker, cleanup }, hotelId) => {
+      if (!currentHotelIds.has(hotelId)) {
+        if (typeof cleanup === 'function') {
+          cleanup();
+        }
+        if (marker) {
+          if (typeof marker.setMap === 'function') {
+            marker.setMap(null);
+          } else {
+            marker.map = null;
+          }
+        }
+        markerStore.delete(hotelId);
       }
     });
-    markerStore.clear();
 
+    // Add or update markers for current hotels
     hotels.forEach((hotel) => {
       if (!hotel.coordinates) return;
 
+      // If marker already exists, skip creation
+      if (markerStore.has(hotel.id)) return;
+
       const subtitle = hotel.name.split(' ')[0];
-      const priceLabel = formatINR(convertToINR(hotel.price));
+      const priceLabel = formatCurrency(hotel.price, hotel.currency);
 
       if (AdvancedMarkerElement) {
         const contentEl = createPriceMarkerElement(priceLabel, subtitle, false);
@@ -976,7 +863,7 @@ const CadreagoApp = () => {
       const hotel = hotels.find((item) => item.id === hotelId);
       if (!hotel || !entry?.marker) return;
 
-      const label = formatINR(convertToINR(hotel.price));
+      const label = formatCurrency(hotel.price, hotel.currency);
       const subtitle = hotel.name.split(' ')[0];
       const isActive = mapSelectedHotel?.id === hotelId;
 
@@ -1857,7 +1744,7 @@ const CadreagoApp = () => {
               </div>
 
               <div className="text-right">
-                <div className="text-2xl md:text-4xl font-bold text-gray-900 mb-1">${hotel.price}</div>
+                <div className="text-2xl md:text-4xl font-bold text-gray-900 mb-1">{formatCurrency(hotel.price, hotel.currency)}</div>
                 <div className="text-xs md:text-sm text-gray-600 mb-2 md:mb-3">
                   {getGuestText()}
                 </div>
@@ -2137,7 +2024,7 @@ const CadreagoApp = () => {
                       </p>
                       <p className="text-sm text-gray-600 mb-3">{activeMapHotel.description}</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-xl font-bold text-gray-900">{formatINR(convertToINR(activeMapHotel.price))}</span>
+                        <span className="text-xl font-bold text-gray-900">{formatCurrency(activeMapHotel.price, activeMapHotel.currency)}</span>
                         <button
                           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
                           onClick={() => {
@@ -2163,10 +2050,12 @@ const CadreagoApp = () => {
   // Hotel Details
   const HotelDetails = () => {
     if (!selectedHotel) return null;
-    const nightlyRateINR = convertToINR(selectedHotel.price);
+    const nightlyRate = selectedHotel.price;
+    const currency = selectedHotel.currency || 'INR';
     const addonOptions = (selectedHotel.addons && selectedHotel.addons.length > 0 ? selectedHotel.addons : availableAddons).map(addon => ({
       ...addon,
-      priceINR: addon.price ? convertToINR(addon.price) : 0
+      addonPrice: addon.price || 0,
+      addonCurrency: addon.currency || currency
     }));
     const policyDetails = selectedHotel.policyDetails || [
       { title: 'Check-in', description: '3:00 PM onwards with express digital check-in' },
@@ -2225,24 +2114,26 @@ const CadreagoApp = () => {
           </div>
 
           {/* Image Gallery */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6 md:mb-8">
-            {selectedHotel.images.map((img, idx) => (
-              <div
-                key={idx}
-                className={`${idx === 0 ? 'col-span-2 row-span-2' : ''} cursor-pointer overflow-hidden rounded-lg group`}
-                onClick={() => {
-                  setCurrentImageIndex(idx);
-                  setShowImageGallery(true);
-                }}
-              >
-                <img
-                  src={img}
-                  alt={`${selectedHotel.name} ${idx + 1}`}
-                  className="w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-110"
-                />
-              </div>
-            ))}
-          </div>
+          {selectedHotel.images && selectedHotel.images.length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6 md:mb-8">
+              {selectedHotel.images.map((img, idx) => (
+                <div
+                  key={idx}
+                  className={`${idx === 0 ? 'col-span-2 row-span-2' : ''} cursor-pointer overflow-hidden rounded-lg group`}
+                  onClick={() => {
+                    setCurrentImageIndex(idx);
+                    setShowImageGallery(true);
+                  }}
+                >
+                  <img
+                    src={img}
+                    alt={`${selectedHotel.name} ${idx + 1}`}
+                    className="w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-110"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
             {/* Main Content */}
@@ -2257,19 +2148,21 @@ const CadreagoApp = () => {
                 </p>
               </section>
 
-              <section>
-                <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 md:mb-6">Services</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                  {Object.entries(selectedHotel.services).map(([key, value]) => 
-                    value && (
-                      <div key={key} className="flex items-center space-x-2 md:space-x-3">
-                        <CheckCircle className="text-green-500 flex-shrink-0" size={20} />
-                        <span className="text-sm md:text-base text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                      </div>
-                    )
-                  )}
-                </div>
-              </section>
+              {selectedHotel.services && Object.keys(selectedHotel.services).length > 0 && (
+                <section>
+                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 md:mb-6">Services</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                    {Object.entries(selectedHotel.services).map(([key, value]) =>
+                      value && (
+                        <div key={key} className="flex items-center space-x-2 md:space-x-3">
+                          <CheckCircle className="text-green-500 flex-shrink-0" size={20} />
+                          <span className="text-sm md:text-base text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
@@ -2289,9 +2182,9 @@ const CadreagoApp = () => {
                         </div>
                       </div>
                       <div className="text-right sm:text-right w-full sm:w-auto">
-                        {addon.priceINR > 0 ? (
+                        {addon.addonPrice > 0 ? (
                           <>
-                            <p className="text-xl font-bold text-gray-900">{formatINR(addon.priceINR)}</p>
+                            <p className="text-xl font-bold text-gray-900">{formatCurrency(addon.addonPrice, addon.addonCurrency)}</p>
                             <p className="text-xs text-gray-500">
                               {addon.perPerson ? 'per guest' : 'per stay'}
                             </p>
@@ -2315,17 +2208,17 @@ const CadreagoApp = () => {
 
                 <div className="mb-4 md:mb-6">
                   <div className="text-base md:text-lg font-semibold mb-2">{selectedHotel.ratingText}</div>
-                  <div className="text-xs md:text-sm text-gray-600">{selectedHotel.reviews} ratings</div>
+                  <div className="text-xs md:text-sm text-gray-600">{selectedHotel.reviews || 0} ratings</div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
-                  {Object.entries(selectedHotel.reviewScores).map(([key, score]) => (
+                  {selectedHotel.reviewScores && Object.entries(selectedHotel.reviewScores).map(([key, score]) => (
                     <div key={key}>
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-xs md:text-sm text-gray-700 capitalize font-medium">{key}</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2 md:h-2.5">
-                        <div 
+                        <div
                           className="bg-blue-600 h-2 md:h-2.5 rounded-full transition-all"
                           style={{ width: getRatingBarWidth(score) }}
                         />
@@ -2334,7 +2227,7 @@ const CadreagoApp = () => {
                   ))}
                 </div>
 
-                {selectedHotel.userReviews.length > 0 && (
+                {selectedHotel.userReviews && selectedHotel.userReviews.length > 0 && (
                   <div className="space-y-4 md:space-y-6">
                     {selectedHotel.userReviews.map(review => (
                       <div key={review.id} className="border-b pb-4 md:pb-6">
@@ -2391,7 +2284,7 @@ const CadreagoApp = () => {
                 <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
                   <div className="border-t pt-4 md:pt-6">
                     <div className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">
-                      {formatINR(nightlyRateINR)}
+                      {formatCurrency(nightlyRate, currency)}
                     </div>
                     <div className="text-xs md:text-sm text-gray-600 mb-4">per night (approx.)</div>
                   </div>
@@ -2474,11 +2367,12 @@ const CadreagoApp = () => {
   // Booking View
   const BookingView = () => {
     if (!selectedHotel) return null;
-    const nightlyRateINR = convertToINR(selectedHotel.price);
-    const addonsTotalINR = convertToINR(calculateAddonsTotal());
-    const subtotalINR = nightlyRateINR + addonsTotalINR;
-    const gstAmount = Math.round(subtotalINR * GST_RATE);
-    const bookingTotalINR = subtotalINR + gstAmount;
+    const nightlyRate = selectedHotel.price;
+    const currency = selectedHotel.currency || 'INR';
+    const addonsTotal = calculateAddonsTotal();
+    const subtotal = nightlyRate + addonsTotal;
+    const gstAmount = Math.round(subtotal * GST_RATE);
+    const bookingTotal = subtotal + gstAmount;
     const selectedAddonDetails = availableAddons.filter(addon => selectedAddons.includes(addon.id));
     const handleBookingSubmit = (e) => {
       e.preventDefault();
@@ -2633,7 +2527,7 @@ const CadreagoApp = () => {
                       {availableAddons.map(addon => {
                         const isSelected = selectedAddons.includes(addon.id);
                         const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
-                        const addonUnitPriceINR = convertToINR(addon.price);
+                        const addonUnitPrice = addon.price;
                         return (
                           <label
                             key={addon.id}
@@ -2659,7 +2553,7 @@ const CadreagoApp = () => {
                                   </div>
                                 </div>
                                 <div className="text-blue-600 font-semibold text-right">
-                                  {formatINR(addonUnitPriceINR)}
+                                  {formatCurrency(addonUnitPrice, currency)}
                                   {addon.perPerson ? <span className="text-xs text-gray-500"> / guest</span> : ''}
                                 </div>
                               </div>
@@ -2679,8 +2573,8 @@ const CadreagoApp = () => {
                       <div className="space-y-2">
                         {selectedAddonDetails.map(addon => {
                           const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
-                          const addonUnitPriceINR = convertToINR(addon.price);
-                          const addonPriceINR = addonUnitPriceINR * multiplier;
+                          const addonUnitPrice = addon.price;
+                          const addonPrice = addonUnitPrice * multiplier;
                           return (
                             <div key={addon.id} className="flex items-center justify-between text-sm text-blue-900">
                               <div className="flex items-center gap-2">
@@ -2690,7 +2584,7 @@ const CadreagoApp = () => {
                                 <span>{addon.name}{addon.perPerson ? ` x${multiplier}` : ''}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold">+{formatINR(addonPriceINR)}</span>
+                                <span className="font-semibold">+{formatCurrency(addonPrice, currency)}</span>
                                 <button
                                   type="button"
                                   onClick={() => toggleAddon(addon.id)}
@@ -2709,21 +2603,21 @@ const CadreagoApp = () => {
                   <div className="pt-6 border-t space-y-3">
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Room rate</span>
-                      <span className="font-semibold text-gray-900">{formatINR(nightlyRateINR)}</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(nightlyRate, currency)}</span>
                     </div>
-                    {addonsTotalINR > 0 && (
+                    {addonsTotal > 0 && (
                       <div className="flex justify-between text-sm text-blue-700">
                         <span>Add-ons</span>
-                        <span className="font-semibold">+{formatINR(addonsTotalINR)}</span>
+                        <span className="font-semibold">+{formatCurrency(addonsTotal, currency)}</span>
                       </div>
                     )}
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Subtotal</span>
-                      <span className="font-semibold text-gray-900">{formatINR(subtotalINR)}</span>
+                      <span className="font-semibold text-gray-900">{formatCurrency(subtotal, currency)}</span>
                     </div>
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>GST ({(GST_RATE * 100).toFixed(0)}%)</span>
-                      <span className="font-semibold text-gray-900">+{formatINR(gstAmount)}</span>
+                      <span className="font-semibold text-gray-900">+{formatCurrency(gstAmount, currency)}</span>
                     </div>
                     <div className="flex justify-between items-center pt-4 border-t">
                       <div>
@@ -2732,7 +2626,7 @@ const CadreagoApp = () => {
                           Includes taxes and {selectedAddonDetails.length > 0 ? 'selected add-ons' : 'standard inclusions'}
                         </p>
                       </div>
-                      <span className="text-4xl font-bold text-blue-600">{formatINR(bookingTotalINR)}</span>
+                      <span className="text-4xl font-bold text-blue-600">{formatCurrency(bookingTotal, currency)}</span>
                     </div>
 
                     <button 
@@ -2748,7 +2642,7 @@ const CadreagoApp = () => {
                   <div id="payment-section" className="mt-10 border-t pt-8">
                     <h3 className="text-2xl font-bold text-gray-900 mb-4">Payment Details</h3>
                     <p className="text-sm text-gray-600 mb-6">
-                      Your total payable amount is <span className="font-semibold text-gray-900">{formatINR(bookingTotalINR)}</span>.
+                      Your total payable amount is <span className="font-semibold text-gray-900">{formatCurrency(bookingTotal, currency)}</span>.
                       Enter your payment details to confirm and navigate to the payment gateway.
                     </p>
                     <form className="space-y-5" onSubmit={handlePaymentSubmit}>
@@ -3894,7 +3788,7 @@ const CadreagoApp = () => {
                         <p className="text-xs text-gray-500">{formatDate(refund.date)}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xl font-bold text-gray-900">{formatINR(convertToINR(refund.amount))}</p>
+                        <p className="text-xl font-bold text-gray-900">{formatCurrency(refund.amount, refund.currency || 'INR')}</p>
                         <p className="text-sm text-gray-500">{refund.method}</p>
                         <span className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold ${
                           refund.status === 'processed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
@@ -3927,19 +3821,19 @@ const CadreagoApp = () => {
                   <div className="border rounded-lg p-4">
                     <p className="text-sm text-gray-500">Total Paid Out</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {formatINR(convertToINR(hostPayouts.reduce((sum, p) => sum + p.amount, 0)))}
+                      {formatCurrency(hostPayouts.reduce((sum, p) => sum + p.amount, 0), 'INR')}
                     </p>
                   </div>
                   <div className="border rounded-lg p-4">
                     <p className="text-sm text-gray-500">Pending Payouts</p>
                     <p className="text-3xl font-bold text-yellow-600">
-                      {formatINR(convertToINR(hostPayouts.filter(p => p.status !== 'completed').reduce((sum, p) => sum + p.amount, 0)))}
+                      {formatCurrency(hostPayouts.filter(p => p.status !== 'completed').reduce((sum, p) => sum + p.amount, 0), 'INR')}
                     </p>
                   </div>
                   <div className="border rounded-lg p-4">
                     <p className="text-sm text-gray-500">Last Payout</p>
                     <p className="text-3xl font-bold text-gray-900">
-                      {formatINR(convertToINR(hostPayouts[0]?.amount || 0))}
+                      {formatCurrency(hostPayouts[0]?.amount || 0, hostPayouts[0]?.currency || 'INR')}
                     </p>
                     <p className="text-sm text-gray-500">{hostPayouts[0]?.date}</p>
                   </div>
@@ -3952,7 +3846,7 @@ const CadreagoApp = () => {
                         <p className="text-sm text-gray-600">{payout.method}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xl font-bold text-gray-900">{formatINR(convertToINR(payout.amount))}</p>
+                        <p className="text-xl font-bold text-gray-900">{formatCurrency(payout.amount, payout.currency || 'INR')}</p>
                         <p className="text-sm text-gray-500">{formatDate(payout.date)}</p>
                         <span className={`inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold ${
                           payout.status === 'completed'
