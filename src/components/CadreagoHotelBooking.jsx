@@ -843,53 +843,23 @@ const CadreagoApp = () => {
 
         googleMapsApiRef.current = googleMaps;
 
-        if (googleMaps.importLibrary) {
-          try {
-            const [{ Map }, markerLib] = await Promise.all([
-              googleMaps.importLibrary('maps'),
-              googleMaps.importLibrary('marker').catch((libError) => {
-                console.warn('Advanced markers unavailable, falling back to legacy markers.', libError);
-                return null;
-              })
-            ]);
+        // The loadGoogleMaps now ensures libraries are loaded
+        // Access Map constructor from google.maps namespace
+        const { Map } = window.google.maps;
 
-            if (!isMounted || !mapContainerRef.current) return;
-            googleMapRef.current = new Map(mapContainerRef.current, {
-              center: initialMapCenter,
-              zoom: 6,
-              gestureHandling: 'greedy',
-              disableDefaultUI: true,
-              zoomControl: true
-            });
+        googleMapRef.current = new Map(mapContainerRef.current, {
+          center: initialMapCenter,
+          zoom: 6,
+          gestureHandling: 'greedy',
+          disableDefaultUI: true,
+          zoomControl: true,
+          mapId: 'DEMO_MAP_ID' // Required for advanced markers
+        });
 
-            if (markerLib?.AdvancedMarkerElement) {
-              advancedMarkerClassRef.current = markerLib.AdvancedMarkerElement;
-              setMarkerLibraryReady(true);
-            } else {
-              advancedMarkerClassRef.current = null;
-              setMarkerLibraryReady(false);
-            }
-          } catch (libError) {
-            console.warn('Error loading modular Maps libraries, falling back to legacy globals.', libError);
-            googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
-              center: initialMapCenter,
-              zoom: 6,
-              gestureHandling: 'greedy',
-              disableDefaultUI: true,
-              zoomControl: true
-            });
-          }
-        } else {
-          advancedMarkerClassRef.current = null;
-          googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
-            center: initialMapCenter,
-            zoom: 6,
-            gestureHandling: 'greedy',
-            disableDefaultUI: true,
-            zoomControl: true
-          });
-          setMarkerLibraryReady(false);
-        }
+        // Check for advanced markers support
+        const { AdvancedMarkerElement } = window.google.maps.marker || {};
+        advancedMarkerClassRef.current = AdvancedMarkerElement || null;
+        setMarkerLibraryReady(Boolean(advancedMarkerClassRef.current));
 
         googleMapRef.current.addListener('zoom_changed', () => {
           const currentZoom = googleMapRef.current?.getZoom();
