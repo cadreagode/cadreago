@@ -835,30 +835,61 @@ const CadreagoApp = () => {
     }
 
     setMarkerLibraryReady(false);
-    loadGoogleMaps(apiKey)
-      .then((googleMaps) => {
+
+    const initializeMap = async () => {
+      try {
+        const googleMaps = await loadGoogleMaps(apiKey);
         if (!isMounted || !mapContainerRef.current) return;
+
         googleMapsApiRef.current = googleMaps;
 
         if (googleMaps.importLibrary) {
-          googleMaps.importLibrary('marker')
-            .then(({ AdvancedMarkerElement }) => {
-              if (!isMounted) return;
-              advancedMarkerClassRef.current = AdvancedMarkerElement;
-              setMarkerLibraryReady(true);
-            })
-            .catch((libError) => {
-              console.warn('Advanced markers unavailable, falling back to legacy markers.', libError);
-            });
-        }
+          try {
+            const [{ Map }, markerLib] = await Promise.all([
+              googleMaps.importLibrary('maps'),
+              googleMaps.importLibrary('marker').catch((libError) => {
+                console.warn('Advanced markers unavailable, falling back to legacy markers.', libError);
+                return null;
+              })
+            ]);
 
-        googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
-          center: initialMapCenter,
-          zoom: 6,
-          gestureHandling: 'greedy',
-          disableDefaultUI: true,
-          zoomControl: true
-        });
+            if (!isMounted || !mapContainerRef.current) return;
+            googleMapRef.current = new Map(mapContainerRef.current, {
+              center: initialMapCenter,
+              zoom: 6,
+              gestureHandling: 'greedy',
+              disableDefaultUI: true,
+              zoomControl: true
+            });
+
+            if (markerLib?.AdvancedMarkerElement) {
+              advancedMarkerClassRef.current = markerLib.AdvancedMarkerElement;
+              setMarkerLibraryReady(true);
+            } else {
+              advancedMarkerClassRef.current = null;
+              setMarkerLibraryReady(false);
+            }
+          } catch (libError) {
+            console.warn('Error loading modular Maps libraries, falling back to legacy globals.', libError);
+            googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
+              center: initialMapCenter,
+              zoom: 6,
+              gestureHandling: 'greedy',
+              disableDefaultUI: true,
+              zoomControl: true
+            });
+          }
+        } else {
+          advancedMarkerClassRef.current = null;
+          googleMapRef.current = new googleMaps.Map(mapContainerRef.current, {
+            center: initialMapCenter,
+            zoom: 6,
+            gestureHandling: 'greedy',
+            disableDefaultUI: true,
+            zoomControl: true
+          });
+          setMarkerLibraryReady(false);
+        }
 
         googleMapRef.current.addListener('zoom_changed', () => {
           const currentZoom = googleMapRef.current?.getZoom();
@@ -870,8 +901,14 @@ const CadreagoApp = () => {
         googleMapRef.current.addListener('click', () => setMapSelectedHotel(null));
         setMapError('');
         setMapLoaded(true);
-      })
-      .catch((error) => setMapError(error.message));
+      } catch (error) {
+        if (isMounted) {
+          setMapError(error.message);
+        }
+      }
+    };
+
+    initializeMap();
 
     return () => {
       isMounted = false;

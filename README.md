@@ -37,7 +37,7 @@ This runs the development server on <http://localhost:3000>. Use `npm run build`
 
 ### Environment Variables
 
-Copy `.env.example` to `.env.local` (kept out of git) and set `REACT_APP_GOOGLE_MAPS_KEY` with your Google Maps JavaScript API key. The interactive map, markers, and upcoming address autocomplete features rely on this key being present at build time.
+Copy `.env.example` to `.env.local` (kept out of git) and set `REACT_APP_GOOGLE_MAPS_KEY` with your Google Maps JavaScript API key. **Never commit the real key**—leave `.env.example` with placeholders only. The interactive map, markers, and upcoming address autocomplete features rely on this key being present at build time, so remember to add the variable in your hosting provider’s environment settings as well (and restrict the key in Google Cloud if possible).
 
 If you need to validate that a raw API key works before wiring it into the React app, open `public/google-map-demo/index.html` directly (or via `http://localhost:3000/google-map-demo/index.html?key=YOUR_KEY`) to load the official Google sample on its own.
 
