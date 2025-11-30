@@ -3,7 +3,6 @@ import { Search, Calendar, Users, Star, MapPin, Wifi, Car, Utensils, Waves, Thum
 import brandLogo from '../assets/logo.png';
 import brandIcon from '../assets/logo_icon.png';
 import brandLogoDark from '../assets/logo_non-transperant.png';
-import { loadGoogleMaps } from '../lib/loadGoogleMaps';
 import { fetchHotels, fetchHotelsByHost } from '../services/hotelService';
 import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus } from '../services/bookingService';
 import { signIn, signUp, signOut, getCurrentUser } from '../services/authService';
@@ -43,101 +42,6 @@ const addonIconMap = {
   Wifi
 };
 
-const buildPriceMarkerIcon = (maps, label, isActive) => {
-  if (!maps) return null;
-  const background = isActive ? '#2563eb' : '#ffffff';
-  const textColor = isActive ? '#ffffff' : '#111827';
-  const border = isActive ? '#1d4ed8' : '#d1d5db';
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="132" height="52">
-      <g>
-        <rect x="1" y="1" rx="20" ry="20" width="130" height="38" fill="${background}" stroke="${border}" stroke-width="1.5"/>
-        <polygon points="48,39 84,39 66,51" fill="${background}" stroke="${border}" stroke-width="1.5"/>
-        <text x="66" y="25" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="600" text-anchor="middle" fill="${textColor}">
-          ${label}
-        </text>
-      </g>
-    </svg>
-  `;
-
-  return {
-    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new maps.Size(132, 52),
-    anchor: new maps.Point(66, 52)
-  };
-};
-
-const createPriceMarkerElement = (label, subtitle, isActive) => {
-  const colors = {
-    background: isActive ? '#2563eb' : '#ffffff',
-    text: isActive ? '#f8fafc' : '#0f172a',
-    border: isActive ? '#1d4ed8' : '#d1d5db'
-  };
-
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'relative';
-  wrapper.style.display = 'flex';
-  wrapper.style.flexDirection = 'column';
-  wrapper.style.alignItems = 'center';
-  wrapper.style.justifyContent = 'center';
-  wrapper.style.padding = '6px 14px 10px';
-  wrapper.style.borderRadius = '999px';
-  wrapper.style.background = colors.background;
-  wrapper.style.color = colors.text;
-  wrapper.style.fontFamily = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  wrapper.style.fontWeight = '600';
-  wrapper.style.boxShadow = '0 10px 30px rgba(15,23,42,0.18)';
-  wrapper.style.border = `1px solid ${colors.border}`;
-  wrapper.style.minWidth = '120px';
-  wrapper.style.pointerEvents = 'auto';
-  wrapper.style.cursor = 'pointer';
-
-  const priceEl = document.createElement('span');
-  priceEl.textContent = label;
-  priceEl.style.fontSize = '15px';
-
-  const subtitleEl = document.createElement('span');
-  subtitleEl.textContent = subtitle;
-  subtitleEl.style.fontSize = '11px';
-  subtitleEl.style.fontWeight = '500';
-  subtitleEl.style.opacity = '0.85';
-
-  const caret = document.createElement('div');
-  caret.style.position = 'absolute';
-  caret.style.bottom = '-9px';
-  caret.style.left = '50%';
-  caret.style.transform = 'translateX(-50%)';
-  caret.style.width = '0';
-  caret.style.height = '0';
-  caret.style.borderLeft = '9px solid transparent';
-  caret.style.borderRight = '9px solid transparent';
-  caret.style.borderTop = `9px solid ${colors.background}`;
-
-  wrapper.appendChild(priceEl);
-  wrapper.appendChild(subtitleEl);
-  wrapper.appendChild(caret);
-
-  return wrapper;
-};
-
-const updatePriceMarkerElement = (element, label, subtitle, isActive) => {
-  if (!element) return;
-  const [priceEl, subtitleEl, caret] = element.childNodes;
-  if (priceEl) priceEl.textContent = label;
-  if (subtitleEl) subtitleEl.textContent = subtitle;
-  const colors = {
-    background: isActive ? '#2563eb' : '#ffffff',
-    text: isActive ? '#f8fafc' : '#0f172a',
-    border: isActive ? '#1d4ed8' : '#d1d5db'
-  };
-  element.style.background = colors.background;
-  element.style.color = colors.text;
-  element.style.border = `1px solid ${colors.border}`;
-  if (caret) {
-    caret.style.borderTop = `9px solid ${colors.background}`;
-  }
-};
-
 const CadreagoApp = () => {
   const [currentView, setCurrentView] = useState('search');
   const [selectedHotel, setSelectedHotel] = useState(null);
@@ -162,12 +66,6 @@ const CadreagoApp = () => {
   const [shareUrl, setShareUrl] = useState('');
   const [showMessageHostModal, setShowMessageHostModal] = useState(false);
   const hostMessageRef = useRef(null);
-  const mapContainerRef = useRef(null);
-  const googleMapRef = useRef(null);
-  const googleMapsApiRef = useRef(null);
-  const mapMarkersRef = useRef(new Map());
-  const advancedMarkerClassRef = useRef(null);
-  const zoomUpdateTimeoutRef = useRef(null);
   const [preferredUserType, setPreferredUserType] = useState('guest');
   const [hostOnboardingCompleted, setHostOnboardingCompleted] = useState(true);
   const [showAddAddonModal, setShowAddAddonModal] = useState(false);
@@ -179,7 +77,6 @@ const CadreagoApp = () => {
   const [mapZoom, setMapZoom] = useState(6);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState('');
-  const [markerLibraryReady, setMarkerLibraryReady] = useState(false);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [searchParams, setSearchParams] = useState({
     destination: 'Miami',
@@ -695,233 +592,29 @@ const CadreagoApp = () => {
 
   const getRatingBarWidth = (score) => `${(score / 10) * 100}%`;
 
+  // Web Components approach - no complex initialization needed
   useEffect(() => {
-    let isMounted = true;
     const apiKey = process.env.REACT_APP_GOOGLE_MAPS_KEY;
-    const mapId = process.env.REACT_APP_GOOGLE_MAPS_MAP_ID;
 
     if (!apiKey) {
       setMapError('Add REACT_APP_GOOGLE_MAPS_KEY to your .env.local file to enable Google Maps.');
       return;
     }
 
-    // Skip if map already initialized - check if map instance exists and has a valid div
-    if (googleMapRef.current?.getDiv?.()) {
-      setMapLoaded(true);
-      return;
-    }
-
-    setMarkerLibraryReady(false);
-
-    const initializeMap = async () => {
-      try {
-        const googleMaps = await loadGoogleMaps(apiKey);
-        if (!isMounted || !mapContainerRef.current) {
-          return;
-        }
-
-        googleMapsApiRef.current = googleMaps;
-
-        // Access Map constructor from google.maps namespace
-        const { Map } = window.google.maps;
-
-        // Map configuration
-        const mapConfig = {
-          center: initialMapCenter,
-          zoom: 6,
-          gestureHandling: 'greedy',
-          disableDefaultUI: true,
-          zoomControl: true
-        };
-
-        // Add Map ID if available (required for AdvancedMarkerElement)
-        if (mapId) {
-          mapConfig.mapId = mapId;
-        }
-
-        googleMapRef.current = new Map(mapContainerRef.current, mapConfig);
-
-        // Check for advanced markers support
-        const markerLib = window.google.maps.marker;
-        const { AdvancedMarkerElement } = markerLib || {};
-
-        // Use AdvancedMarkerElement if available and we have a Map ID
-        if (AdvancedMarkerElement && mapId) {
-          advancedMarkerClassRef.current = AdvancedMarkerElement;
-          setMarkerLibraryReady(true);
-          console.log('✓ Using AdvancedMarkerElement (modern markers)');
-        } else {
-          advancedMarkerClassRef.current = null;
-          setMarkerLibraryReady(false);
-          if (!mapId) {
-            console.log('ℹ Using legacy markers (no Map ID provided). Add REACT_APP_GOOGLE_MAPS_MAP_ID to .env.local to enable AdvancedMarkerElement.');
-          } else {
-            console.warn('⚠ AdvancedMarkerElement not available, falling back to legacy markers');
-          }
-        }
-
-        googleMapRef.current.addListener('zoom_changed', () => {
-          const currentZoom = googleMapRef.current?.getZoom();
-          if (typeof currentZoom === 'number') {
-            // Throttle zoom updates to prevent excessive re-renders
-            if (zoomUpdateTimeoutRef.current) {
-              clearTimeout(zoomUpdateTimeoutRef.current);
-            }
-            zoomUpdateTimeoutRef.current = setTimeout(() => {
-              setMapZoom(currentZoom);
-            }, 100);
-          }
-        });
-
-        googleMapRef.current.addListener('click', () => setMapSelectedHotel(null));
-        setMapError('');
+    // Web Components load automatically from the script tag in index.html
+    // Just wait for the API to be ready
+    const checkGoogleMapsReady = () => {
+      if (window.google?.maps) {
         setMapLoaded(true);
-      } catch (error) {
-        console.error('Map initialization error:', error);
-        if (isMounted) {
-          setMapError(error.message);
-        }
+        setMapError('');
+      } else {
+        // Check again in 100ms
+        setTimeout(checkGoogleMapsReady, 100);
       }
     };
 
-    initializeMap();
-
-    return () => {
-      isMounted = false;
-      if (zoomUpdateTimeoutRef.current) {
-        clearTimeout(zoomUpdateTimeoutRef.current);
-      }
-    };
-  }, []); // Remove initialMapCenter dependency to prevent re-initialization
-
-  // Separate effect to update map center when initialMapCenter changes
-  useEffect(() => {
-    if (googleMapRef.current && mapLoaded && initialMapCenter) {
-      googleMapRef.current.panTo(initialMapCenter);
-    }
-  }, [initialMapCenter, mapLoaded]);
-
-  useEffect(() => {
-    if (!mapLoaded || !googleMapsApiRef.current || !googleMapRef.current) {
-      return;
-    }
-
-    const maps = googleMapsApiRef.current;
-    const markerStore = mapMarkersRef.current;
-    const AdvancedMarkerElement = advancedMarkerClassRef.current;
-
-    // Track which hotel IDs we need markers for
-    const currentHotelIds = new Set(hotels.map(h => h.id).filter(Boolean));
-
-    // Remove markers for hotels that no longer exist
-    markerStore.forEach(({ marker, cleanup }, hotelId) => {
-      if (!currentHotelIds.has(hotelId)) {
-        if (typeof cleanup === 'function') {
-          cleanup();
-        }
-        if (marker) {
-          if (typeof marker.setMap === 'function') {
-            marker.setMap(null);
-          } else {
-            marker.map = null;
-          }
-        }
-        markerStore.delete(hotelId);
-      }
-    });
-
-    // Add or update markers for current hotels
-    hotels.forEach((hotel) => {
-      if (!hotel.coordinates) return;
-
-      // If marker already exists, skip creation
-      if (markerStore.has(hotel.id)) return;
-
-      const subtitle = hotel.name.split(' ')[0];
-      const priceLabel = formatCurrency(hotel.price, hotel.currency);
-
-      if (AdvancedMarkerElement) {
-        const contentEl = createPriceMarkerElement(priceLabel, subtitle, false);
-        const marker = new AdvancedMarkerElement({
-          map: googleMapRef.current,
-          position: hotel.coordinates,
-          content: contentEl,
-          zIndex: 1
-        });
-
-        const handleMarkerClick = (event) => {
-          event.stopPropagation?.();
-          event.preventDefault?.();
-          setMapSelectedHotel(hotel);
-          googleMapRef.current?.panTo(hotel.coordinates);
-        };
-
-        contentEl.addEventListener('click', handleMarkerClick);
-
-        markerStore.set(hotel.id, { marker, contentEl, cleanup: () => contentEl.removeEventListener('click', handleMarkerClick) });
-        return;
-      }
-
-      const fallbackMarker = new maps.Marker({
-        position: hotel.coordinates,
-        map: googleMapRef.current,
-        optimized: false,
-        icon: buildPriceMarkerIcon(maps, priceLabel, false)
-      });
-
-      fallbackMarker.addListener('click', () => {
-        setMapSelectedHotel(hotel);
-        googleMapRef.current?.panTo(hotel.coordinates);
-      });
-
-      markerStore.set(hotel.id, { marker: fallbackMarker });
-    });
-
-    return () => {
-      markerStore.forEach(({ marker, cleanup }) => {
-        if (typeof cleanup === 'function') {
-          cleanup();
-        }
-        if (!marker) return;
-        if (typeof marker.setMap === 'function') {
-          marker.setMap(null);
-        } else {
-          marker.map = null;
-        }
-      });
-      markerStore.clear();
-    };
-  }, [mapLoaded, hotels, markerLibraryReady]);
-
-  useEffect(() => {
-    if (!mapLoaded || !googleMapsApiRef.current) {
-      return;
-    }
-
-    const maps = googleMapsApiRef.current;
-    mapMarkersRef.current.forEach((entry, hotelId) => {
-      const hotel = hotels.find((item) => item.id === hotelId);
-      if (!hotel || !entry?.marker) return;
-
-      const label = formatCurrency(hotel.price, hotel.currency);
-      const subtitle = hotel.name.split(' ')[0];
-      const isActive = mapSelectedHotel?.id === hotelId;
-
-      if (entry.contentEl) {
-        updatePriceMarkerElement(entry.contentEl, label, subtitle, isActive);
-        entry.marker.zIndex = isActive ? 2 : 1;
-        return;
-      }
-
-      const icon = buildPriceMarkerIcon(maps, label, isActive);
-      if (icon && typeof entry.marker.setIcon === 'function') {
-        entry.marker.setIcon(icon);
-      }
-      if (typeof entry.marker.setZIndex === 'function') {
-        entry.marker.setZIndex(isActive ? 2 : 1);
-      }
-    });
-  }, [mapLoaded, hotels, mapSelectedHotel]);
+    checkGoogleMapsReady();
+  }, []);
 
   // Guest Selector Component
   const GuestSelector = ({ show, onClose }) => {
@@ -1810,13 +1503,7 @@ const CadreagoApp = () => {
   const SearchResults = () => {
     const activeMapHotel = mapSelectedHotel;
     const handleZoom = (delta) => {
-      setMapZoom(prev => {
-        const next = Math.min(13, Math.max(4, prev + delta));
-        if (googleMapRef.current) {
-          googleMapRef.current.setZoom(next);
-        }
-        return next;
-      });
+      setMapZoom(prev => Math.min(13, Math.max(4, prev + delta)));
     };
 
     return (
@@ -2021,15 +1708,8 @@ const CadreagoApp = () => {
                 </div>
               </div>
 
-              {/* Map container with fixed height - property card will overlay on top */}
-              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 lg:sticky lg:top-24" style={{ height: '560px' }}>
-                {/* Map div - always rendered, never conditional */}
-                <div
-                  ref={mapContainerRef}
-                  className="absolute inset-0 w-full h-full"
-                  style={{ minHeight: '560px' }}
-                />
-
+              {/* Map container with fixed height - sticky/floating on scroll */}
+              <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 sticky top-4 md:top-20 lg:top-24" style={{ height: '560px' }}>
                 {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-sm text-gray-600 bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300 pointer-events-none z-10">
@@ -2043,6 +1723,61 @@ const CadreagoApp = () => {
                     <p className="font-semibold text-gray-900 mb-1">Map unavailable</p>
                     <p className="text-sm text-gray-600">{mapError}</p>
                   </div>
+                )}
+
+                {/* Google Maps Web Component */}
+                {mapLoaded && !mapError && (
+                  <gmp-map
+                    center={`${initialMapCenter.lat},${initialMapCenter.lng}`}
+                    zoom={mapZoom.toString()}
+                    map-id={process.env.REACT_APP_GOOGLE_MAPS_MAP_ID || ''}
+                    style={{ width: '100%', height: '100%' }}
+                    onClick={() => setMapSelectedHotel(null)}
+                  >
+                    {hotels.map((hotel) => {
+                      if (!hotel.coordinates) return null;
+
+                      const priceLabel = formatCurrency(hotel.price, hotel.currency);
+                      const isActive = mapSelectedHotel?.id === hotel.id;
+
+                      return (
+                        <gmp-advanced-marker
+                          key={hotel.id}
+                          position={`${hotel.coordinates.lat},${hotel.coordinates.lng}`}
+                          title={hotel.name}
+                          z-index={isActive ? 2 : 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMapSelectedHotel(hotel);
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: 'relative',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '6px 14px 10px',
+                              borderRadius: '999px',
+                              background: isActive ? '#2563eb' : '#ffffff',
+                              color: isActive ? '#f8fafc' : '#0f172a',
+                              fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                              fontWeight: '600',
+                              boxShadow: '0 10px 30px rgba(15,23,42,0.18)',
+                              border: `1px solid ${isActive ? '#1d4ed8' : '#d1d5db'}`,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              fontSize: '14px',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {priceLabel}
+                          </div>
+                        </gmp-advanced-marker>
+                      );
+                    })}
+                  </gmp-map>
                 )}
 
                 {/* Property card overlay - positioned absolutely so it doesn't affect map height */}
