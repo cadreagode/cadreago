@@ -1,21 +1,98 @@
-MIT License
+Cadreago Software License
+© 2025 Cadreago De Private Limited
+All Rights Reserved
 
-Copyright (c) 2025 Cadreago
+Overview
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This document sets forth the licensing terms for all software, source code, APIs, SDKs, mobile apps, web applications, UI/UX designs, database schemas, documentation, and intellectual property owned by Cadreago De Private Limited (“Cadreago”). Unless explicitly stated otherwise, all Cadreago products are proprietary, and all rights are reserved.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Proprietary License
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2.1 License Grant
+Cadreago grants the end user a limited, non-exclusive, non-transferable, revocable license to use the Software solely for personal or internal business purposes. No ownership rights are transferred.
+
+2.2 Restrictions
+The user is strictly prohibited from:
+• Copying or redistributing the Software
+• Modifying or creating derivative works
+• Reverse-engineering or decompiling
+• Creating competing services using the Software
+• Selling, sublicensing, leasing, or renting the Software
+• Sharing API keys or internal endpoints
+• Removing Cadreago copyright notices
+• Using Cadreago branding without written permission
+
+Violation results in immediate termination of the license.
+
+Intellectual Property Ownership
+
+All components of the Software—including source code, APIs, SDKs, UI/UX design, artwork, logos, documentation, and architecture—remain the sole property of Cadreago De Private Limited. Nothing in this License transfers any intellectual property rights to the user.
+
+Trademark Protection
+
+The following marks are protected: Cadreago™, Cadreago De Private Limited™, the CG Logo, and the Cadreago Booking Platform™. Users may not use these names or logos, register similar domain names, claim association, or use the branding in advertisements or apps without prior written consent.
+
+SaaS and Web Service Terms
+
+If provided as a hosted web service (SaaS):
+
+Allowed:
+• Accessing via web or mobile
+• Using the service for supported purposes within legal limits
+
+Not Allowed:
+• Scraping data
+• Cloning or replicating the platform
+• Automated access beyond rate limits
+• Circumventing authentication
+• Hosting or self-deploying Cadreago services
+
+Cadreago reserves the right to suspend or terminate accounts violating these terms.
+
+API and SDK Usage Terms
+
+Allowed:
+• Internal integrations
+• Third-party tooling with permission
+• Limited automation within rate limits
+
+Not Allowed:
+• Sharing API keys
+• Building alternate booking engines
+• Reproducing Cadreago UX or business logic
+• Creating competitive commercial platforms
+
+Cadreago may revoke API access at any time for misuse.
+
+Dual Licensing Option
+
+Some non-core components may be released under the MIT License (helper libraries, utilities). Such components will contain an explicit MIT notice. All core logic—including the booking engine, host payout algorithms, backend logic, database schemas, branding, and mobile frameworks—remain fully proprietary.
+
+Updates and Support
+
+Cadreago may release updates, bug fixes, or enhancements at its discretion. There is no obligation to provide support unless covered by a separate written agreement.
+
+Warranty Disclaimer
+
+The Software is provided “as is,” without warranty of any kind, express or implied. Cadreago disclaims warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+Limitation of Liability
+
+Cadreago De Private Limited is not liable for loss of data, revenue, business interruption, or any indirect, incidental, or consequential damages.
+
+Termination
+
+This license terminates automatically if the user violates any part of this License. Upon termination, the user must stop all usage and delete all copies of the Software. Cadreago may pursue legal remedies for violations.
+
+Governing Law
+
+This License is governed by the laws of India. All disputes shall fall under the exclusive jurisdiction of courts in Kerala, India.
+
+Contact
+
+Cadreago De Private Limited
+Email: support@cadreago.com
+
+Website: https://cadreago.com
+
+Address: Kerala, India
