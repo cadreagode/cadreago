@@ -8,6 +8,7 @@ import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatu
 import { signIn, signUp, signOut, getCurrentUser } from '../services/authService';
 import { fetchUserPayments } from '../services/paymentService';
 import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
+import CadreagoMobileApp from './cadreagoHotelBookingMobileView';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
 const formatCurrency = (amount, currency = 'INR') => {
@@ -48,7 +49,7 @@ const CadreagoApp = () => {
   const [favorites, setFavorites] = useState([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showBanner, setShowBanner] = useState(true);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 360);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showGuestSelector, setShowGuestSelector] = useState(false);
   const [showDestinations, setShowDestinations] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -338,7 +339,7 @@ const CadreagoApp = () => {
   // Detect screen size
   React.useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 360);
+      setIsMobile(window.innerWidth <= 768);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -520,7 +521,7 @@ const CadreagoApp = () => {
     setCurrentView('search');
   };
   const [filters, setFilters] = useState({
-    priceRange: [0, 500],
+    priceRange: [0, 100000],
     rating: 'all',
     type: 'all',
     amenities: []
@@ -627,51 +628,56 @@ const CadreagoApp = () => {
     return R * c;
   };
 
+  // Add state for sorting
+  const [sortBy, setSortBy] = useState('');
+
   // Filter hotels based on selected location from Google Places
   const filteredHotels = React.useMemo(() => {
+    let filtered = hotels;
+
     // If no search query, show all hotels
     if (!searchParams.destination || searchParams.destination.trim() === '') {
       console.log('No search query - showing all', hotels.length, 'properties');
-      return hotels;
-    }
+      filtered = hotels;
+    } else {
 
-    // If Google Place was selected, use its location data
-    if (selectedPlace && selectedPlace.geometry) {
-      console.log('Filtering by Google Place:', selectedPlace);
-      console.log('Address components:', selectedPlace.address_components);
+      // If Google Place was selected, use its location data
+      if (selectedPlace && selectedPlace.geometry) {
+        console.log('Filtering by Google Place:', selectedPlace);
+        console.log('Address components:', selectedPlace.address_components);
 
-      const searchLat = selectedPlace.geometry.location.lat();
-      const searchLng = selectedPlace.geometry.location.lng();
+        const searchLat = selectedPlace.geometry.location.lat();
+        const searchLng = selectedPlace.geometry.location.lng();
 
-      // Extract location components from Google Places
-      const placeComponents = {
-        city: selectedPlace.address_components?.find(c =>
-          c.types.includes('locality') || c.types.includes('administrative_area_level_2')
-        )?.long_name?.toLowerCase() || '',
-        state: selectedPlace.address_components?.find(c =>
-          c.types.includes('administrative_area_level_1')
-        )?.long_name?.toLowerCase() || '',
-        country: selectedPlace.address_components?.find(c =>
-          c.types.includes('country')
-        )?.long_name?.toLowerCase() || '',
-        // Also extract from formatted_address as fallback
-        placeName: selectedPlace.name?.toLowerCase() || '',
-        formattedAddress: selectedPlace.formatted_address?.toLowerCase() || ''
-      };
+        // Extract location components from Google Places
+        const placeComponents = {
+          city: selectedPlace.address_components?.find(c =>
+            c.types.includes('locality') || c.types.includes('administrative_area_level_2')
+          )?.long_name?.toLowerCase() || '',
+          state: selectedPlace.address_components?.find(c =>
+            c.types.includes('administrative_area_level_1')
+          )?.long_name?.toLowerCase() || '',
+          country: selectedPlace.address_components?.find(c =>
+            c.types.includes('country')
+          )?.long_name?.toLowerCase() || '',
+          // Also extract from formatted_address as fallback
+          placeName: selectedPlace.name?.toLowerCase() || '',
+          formattedAddress: selectedPlace.formatted_address?.toLowerCase() || ''
+        };
 
-      console.log('Place components:', placeComponents);
+        console.log('Place components:', placeComponents);
 
-      // Use larger radius for India (500km to cover entire states)
-      // Check if place is in India from address components OR formatted address
-      const isInIndia = placeComponents.country === 'india' ||
-                        placeComponents.formattedAddress.includes('india') ||
-                        placeComponents.formattedAddress.includes('kerala') ||
-                        placeComponents.formattedAddress.includes('karnataka') ||
-                        placeComponents.formattedAddress.includes('tamil nadu');
-      const radiusKm = isInIndia ? 500 : 100;
-      console.log('Search radius:', radiusKm, 'km', '- Is in India:', isInIndia);
+        // Use larger radius for India (500km to cover entire states)
+        // Check if place is in India from address components OR formatted address
+        const isInIndia = placeComponents.country === 'india' ||
+                          placeComponents.formattedAddress.includes('india') ||
+                          placeComponents.formattedAddress.includes('kerala') ||
+                          placeComponents.formattedAddress.includes('karnataka') ||
+                          placeComponents.formattedAddress.includes('tamil nadu');
+        const radiusKm = isInIndia ? 500 : 100;
+        console.log('Search radius:', radiusKm, 'km', '- Is in India:', isInIndia);
 
-      const filtered = hotels.filter(hotel => {
+        filtered = hotels.filter(hotel => {
         // First try coordinate-based distance matching
         if (hotel.coordinates) {
           const distance = calculateDistance(
@@ -746,35 +752,96 @@ const CadreagoApp = () => {
         return false;
       });
 
-      console.log('Filtered', filtered.length, 'properties for', selectedPlace.name);
-      return filtered;
+        console.log('Filtered', filtered.length, 'properties for', selectedPlace.name);
+      } else {
+        // Fallback: Text-based search (when Google Places hasn't loaded or user typed manually)
+        const searchTerm = searchParams.destination.toLowerCase().trim();
+        console.log('Filtering by text search:', searchTerm);
+
+        filtered = hotels.filter(hotel => {
+          const location = hotel.location?.toLowerCase() || '';
+          const city = hotel.city?.toLowerCase() || '';
+          const country = hotel.country?.toLowerCase() || '';
+          const name = hotel.name?.toLowerCase() || '';
+
+          const matches = location.includes(searchTerm) ||
+                 city.includes(searchTerm) ||
+                 country.includes(searchTerm) ||
+                 name.includes(searchTerm);
+
+          if (matches) {
+            console.log('✓ Text match:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
+          }
+
+          return matches;
+        });
+
+        console.log('Filtered', filtered.length, 'properties by text search');
+      }
     }
 
-    // Fallback: Text-based search (when Google Places hasn't loaded or user typed manually)
-    const searchTerm = searchParams.destination.toLowerCase().trim();
-    console.log('Filtering by text search:', searchTerm);
-
-    const filtered = hotels.filter(hotel => {
-      const location = hotel.location?.toLowerCase() || '';
-      const city = hotel.city?.toLowerCase() || '';
-      const country = hotel.country?.toLowerCase() || '';
-      const name = hotel.name?.toLowerCase() || '';
-
-      const matches = location.includes(searchTerm) ||
-             city.includes(searchTerm) ||
-             country.includes(searchTerm) ||
-             name.includes(searchTerm);
-
-      if (matches) {
-        console.log('✓ Text match:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
-      }
-
-      return matches;
+    // Apply price range filter
+    filtered = filtered.filter(hotel => {
+      const price = hotel.price || hotel.price_per_night || 0;
+      return price >= filters.priceRange[0] && price <= filters.priceRange[1];
     });
 
-    console.log('Filtered', filtered.length, 'properties by text search');
+    // Apply rating filter
+    if (filters.rating !== 'all') {
+      const minRating = Number(filters.rating);
+      filtered = filtered.filter(hotel => (hotel.rating || 0) >= minRating);
+    }
+
+    // Apply type filter
+    if (filters.type !== 'all') {
+      filtered = filtered.filter(hotel => {
+        const hotelType = (hotel.type || '').toLowerCase();
+        const filterType = filters.type.toLowerCase();
+
+        // Handle plural forms
+        if (filterType === 'hotels') return hotelType === 'hotel';
+        if (filterType === 'resorts') return hotelType === 'resort';
+        if (filterType === 'guesthouses') return hotelType === 'guesthouse' || hotelType === 'guest house';
+        if (filterType === 'farmstays') return hotelType === 'farmstay' || hotelType === 'farm stay';
+        if (filterType === 'apartments') return hotelType === 'apartment';
+
+        return hotelType === filterType;
+      });
+    }
+
+    // Apply amenities filter
+    if (filters.amenities && filters.amenities.length > 0) {
+      filtered = filtered.filter(hotel => {
+        const hotelAmenities = (hotel.amenities || []).map(a => a.toLowerCase());
+        return filters.amenities.every(filterAmenity =>
+          hotelAmenities.some(ha => ha.includes(filterAmenity.toLowerCase()))
+        );
+      });
+    }
+
+    // Apply sorting
+    if (sortBy) {
+      filtered = [...filtered].sort((a, b) => {
+        const priceA = a.price || a.price_per_night || 0;
+        const priceB = b.price || b.price_per_night || 0;
+        const ratingA = a.rating || 0;
+        const ratingB = b.rating || 0;
+
+        switch (sortBy) {
+          case 'price-low':
+            return priceA - priceB;
+          case 'price-high':
+            return priceB - priceA;
+          case 'rating':
+            return ratingB - ratingA;
+          default:
+            return 0;
+        }
+      });
+    }
+
     return filtered;
-  }, [hotels, selectedPlace, searchParams.destination]);
+  }, [hotels, selectedPlace, searchParams.destination, filters, sortBy]);
 
   // Check if a coordinate is within map bounds
   const isWithinBounds = (lat, lng, bounds) => {
@@ -2008,27 +2075,47 @@ const CadreagoApp = () => {
 
   // Filter row
   const FilterBar = () => (
-    <div className="bg-white rounded-lg shadow-md p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 overflow-x-auto">
+    <div className="bg-white rounded-lg shadow-md p-4 flex flex-col gap-4 overflow-x-auto">
       <div className="flex items-center space-x-3">
         <Filter size={18} className="text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-800">Filters</h3>
       </div>
-      <div className="flex flex-wrap items-center gap-4 flex-1">
-        <div className="flex items-center space-x-2">
-          <span className="text-xs text-gray-500">Min</span>
-          <input 
-            type="number" 
-            value={filters.priceRange[0]}
-            className="w-20 px-2 py-1 border rounded text-sm"
-            onChange={(e) => setFilters({...filters, priceRange: [Number(e.target.value) || 0, filters.priceRange[1]]})}
-          />
-          <span className="text-xs text-gray-500">Max</span>
-          <input 
-            type="number" 
-            value={filters.priceRange[1]}
-            className="w-20 px-2 py-1 border rounded text-sm"
-            onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Number(e.target.value) || 0]})}
-          />
+      <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+        {/* Price Range Slider */}
+        <div className="flex-1 min-w-[200px] max-w-md">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-700">Price Range</span>
+            <span className="text-xs text-gray-600">
+              {formatCurrency(filters.priceRange[0])} - {formatCurrency(filters.priceRange[1])}
+            </span>
+          </div>
+          <div className="space-y-2">
+            <input
+              type="range"
+              min="0"
+              max="100000"
+              step="1000"
+              value={filters.priceRange[1]}
+              onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Number(e.target.value)]})}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <div className="flex gap-2">
+              <input
+                type="number"
+                placeholder="Min"
+                value={filters.priceRange[0]}
+                onChange={(e) => setFilters({...filters, priceRange: [Math.min(Number(e.target.value) || 0, filters.priceRange[1] - 1000), filters.priceRange[1]]})}
+                className="w-24 px-2 py-1 border border-gray-300 rounded text-xs"
+              />
+              <input
+                type="number"
+                placeholder="Max"
+                value={filters.priceRange[1]}
+                onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Math.max(Number(e.target.value) || 100000, filters.priceRange[0] + 1000)]})}
+                className="w-24 px-2 py-1 border border-gray-300 rounded text-xs"
+              />
+            </div>
+          </div>
         </div>
         <select
           value={filters.rating}
@@ -2065,7 +2152,11 @@ const CadreagoApp = () => {
   );
 
   // Hotel Card matching exact design from image 2
-  const HotelCard = ({ hotel }) => (
+  const HotelCard = ({ hotel }) => {
+    // Calculate stars based on rating (0-10 scale converted to 0-5 stars)
+    const starCount = hotel.stars || Math.min(5, Math.round((hotel.rating || 0) / 2));
+
+    return (
     <div
       className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow cursor-pointer"
       onClick={() => {
@@ -2077,75 +2168,93 @@ const CadreagoApp = () => {
       <div className="flex flex-col md:flex-row">
         {/* Image Section */}
         <div className="md:w-2/5 relative">
-          <img 
-            src={hotel.image} 
+          <img
+            src={hotel.image}
             alt={hotel.name}
-            className="w-full h-48 md:h-full object-cover"
+            className="w-full h-40 md:h-48 object-cover"
           />
           {hotel.ecoFriendly && (
-            <div className="absolute bottom-3 left-3 bg-green-500 text-white px-3 py-1.5 rounded text-xs flex items-center space-x-1.5">
-              <Sparkles size={14} />
-              <span className="font-medium">Eco-friendly stay</span>
+            <div className="absolute bottom-2 left-2 bg-green-500 text-white px-2 py-1 rounded text-xs flex items-center space-x-1">
+              <Sparkles size={12} />
+              <span className="font-medium">Eco-friendly</span>
             </div>
           )}
         </div>
 
         {/* Content Section */}
-        <div className="md:w-3/5 p-4 md:p-6">
-          <div className="flex flex-col md:flex-row justify-between items-start mb-3">
-            <div className="flex-1 mb-4 md:mb-0">
-              <h3 className="text-xl md:text-2xl font-bold text-gray-900 mb-2">{hotel.name}</h3>
-              <div className="flex items-center space-x-1 mb-2">
-                {[...Array(hotel.stars)].map((_, i) => (
-                  <Star key={i} size={16} fill="#000" color="#000" />
-                ))}
+        <div className="md:w-3/5 p-3 md:p-4">
+          <div className="flex flex-col md:flex-row justify-between items-start mb-2">
+            <div className="flex-1 mb-3 md:mb-0">
+              <h3 className="text-lg md:text-xl font-bold text-gray-900 mb-1">{hotel.name}</h3>
+              <div className="flex items-center space-x-1 mb-1">
+                {starCount > 0 ? (
+                  [...Array(starCount)].map((_, i) => (
+                    <Star key={i} size={14} fill="#000" color="#000" />
+                  ))
+                ) : (
+                  <span className="text-xs text-gray-400">No rating</span>
+                )}
               </div>
-              <div className="flex items-center text-gray-500 text-sm mb-3">
+              <div className="flex items-center text-gray-500 text-xs mb-2">
                 <span>{hotel.location}</span>
               </div>
 
               {/* Limited Deal Badge */}
               {hotel.limitedDeal && (
-                <div className="mb-3">
-                  <span className="inline-block px-3 md:px-4 py-1.5 md:py-2 bg-green-500 text-white rounded-lg text-xs md:text-sm font-semibold">
+                <div className="mb-2">
+                  <span className="inline-block px-2 py-1 bg-green-500 text-white rounded text-xs font-semibold">
                     Limited time deal
                   </span>
                 </div>
               )}
 
-              {/* Amenities */}
-              <div className="flex flex-wrap gap-2 mb-3">
-                {hotel.amenities.map((amenity, idx) => (
-                  <span key={idx} className="px-2 md:px-4 py-1 md:py-2 bg-gray-100 text-gray-700 rounded-lg text-xs md:text-sm font-medium">
+              {/* Amenities - Show first 3 with icons */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {(hotel.amenities || []).slice(0, 3).map((amenity, idx) => (
+                  <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs font-medium flex items-center gap-1">
+                    {amenity === 'WiFi' && <Wifi size={12} />}
+                    {amenity === 'Pool' && <Waves size={12} />}
+                    {amenity === 'Parking' && <Car size={12} />}
+                    {amenity === 'Spa' && <Sparkles size={12} />}
                     {amenity}
                   </span>
                 ))}
+                {(hotel.amenities || []).length > 3 && (
+                  <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">
+                    +{hotel.amenities.length - 3} more
+                  </span>
+                )}
               </div>
 
-              {/* Free Cancellation Box */}
+              {/* Free Cancellation Box - Compact */}
               {hotel.freeCancellation && (
-                <div className="border-2 border-blue-500 rounded-lg p-3 md:p-4 mb-3">
-                  <div className="text-blue-600 font-semibold text-sm md:text-base mb-1">Free cancellation</div>
-                  <div className="text-red-600 font-semibold text-xs md:text-sm">
-                    Only {hotel.roomsLeft} room at this price on our site
+                <div className="border border-blue-400 rounded-lg p-2 mb-2 bg-blue-50">
+                  <div className="text-blue-700 font-semibold text-xs flex items-center gap-1">
+                    <CheckCircle size={12} />
+                    Free cancellation
                   </div>
+                  {hotel.roomsLeft && (
+                    <div className="text-red-600 font-medium text-xs mt-0.5">
+                      Only {hotel.roomsLeft} room left
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Rating and Price Section */}
-            <div className="w-full md:w-auto text-right md:ml-4 flex md:flex-col justify-between md:justify-start items-end">
-              <div className="mb-0 md:mb-4">
-                <div className="text-xs md:text-sm text-gray-600 mb-1">{hotel.ratingText}</div>
-                <div className="text-xs text-gray-500 mb-1 md:mb-2">{hotel.reviews} ratings</div>
-                <div className={`inline-flex items-center px-2 md:px-3 py-1 md:py-2 ${getRatingColor(hotel.rating)} text-white rounded-lg font-bold text-base md:text-lg`}>
+            <div className="w-full md:w-auto text-right md:ml-3 flex md:flex-col justify-between md:justify-start items-end">
+              <div className="mb-0 md:mb-3">
+                <div className="text-xs text-gray-600 mb-0.5">{hotel.ratingText}</div>
+                <div className="text-xs text-gray-500 mb-1">{hotel.reviews} ratings</div>
+                <div className={`inline-flex items-center px-2 py-1 ${getRatingColor(hotel.rating)} text-white rounded font-bold text-sm`}>
                   {hotel.rating}
                 </div>
               </div>
 
               <div className="text-right">
-                <div className="text-2xl md:text-4xl font-bold text-gray-900 mb-1">{formatCurrency(hotel.price, hotel.currency)}</div>
-                <div className="text-xs md:text-sm text-gray-600 mb-2 md:mb-3">
+                <div className="text-xl md:text-2xl font-bold text-gray-900 mb-0.5">{formatCurrency(hotel.price, hotel.currency)}</div>
+                <div className="text-xs text-gray-600 mb-2">
                   {getGuestText()}
                 </div>
                 <button
@@ -2154,7 +2263,7 @@ const CadreagoApp = () => {
                     setSelectedHotel(hotel);
                     setCurrentView('details');
                   }}
-                  className="w-full md:w-auto px-4 md:px-8 py-2 md:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm md:text-lg shadow-md"
+                  className="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm shadow-md"
                 >
                   Book
                 </button>
@@ -2165,6 +2274,7 @@ const CadreagoApp = () => {
       </div>
     </div>
   );
+  };
 
   // Search Results matching image 1
   const SearchResults = () => {
@@ -2257,10 +2367,10 @@ const CadreagoApp = () => {
             <div>
               <label className="block text-sm text-gray-600 mb-1">Check out</label>
               <div className="relative">
-                <input 
+                <input
                   type="date"
                   value={searchParams.checkOut}
-                  min={searchParams.checkIn || new Date().toISOString().split('T')[0]}
+                  min={searchParams.checkIn ? new Date(new Date(searchParams.checkIn).setDate(new Date(searchParams.checkIn).getDate() + 1)).toISOString().split('T')[0] : new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0]}
                   onChange={(e) => setSearchParams({...searchParams, checkOut: e.target.value})}
                   className="w-full pl-3 pr-3 md:pl-4 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
                 />
@@ -2341,11 +2451,15 @@ const CadreagoApp = () => {
               <h2 className="text-xl md:text-2xl font-bold text-gray-900">Properties found</h2>
               <div className="flex items-center space-x-2 w-full sm:w-auto">
                 <label className="text-xs md:text-sm text-gray-600 whitespace-nowrap">Sort by</label>
-                <select className="flex-1 sm:flex-initial px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-xs md:text-sm">
-                  <option>Choose an option</option>
-                  <option>Price: Low to High</option>
-                  <option>Price: High to Low</option>
-                  <option>Rating</option>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="flex-1 sm:flex-initial px-3 md:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-xs md:text-sm"
+                >
+                  <option value="">Choose an option</option>
+                  <option value="price-low">Price: Low to High</option>
+                  <option value="price-high">Price: High to Low</option>
+                  <option value="rating">Rating</option>
                 </select>
               </div>
             </div>
@@ -2453,22 +2567,22 @@ const CadreagoApp = () => {
                     <button
                       type="button"
                       aria-label="Close map preview"
-                      className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 transition-colors z-40"
+                      className="absolute top-2 right-2 h-7 w-7 flex items-center justify-center rounded-full bg-white hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors z-40 shadow-md"
                       onClick={(e) => {
                         e.stopPropagation();
                         setMapSelectedHotel(null);
                       }}
                     >
-                      <X size={18} />
+                      <X size={16} />
                     </button>
                     <img
                       src={activeMapHotel.image}
                       alt={activeMapHotel.name}
                       className="w-full sm:w-32 h-32 object-cover rounded-lg flex-shrink-0"
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h4 className="text-lg font-semibold text-gray-900 truncate pr-2">{activeMapHotel.name}</h4>
+                    <div className="flex-1 min-w-0 pr-6">
+                      <div className="flex items-start justify-between mb-1 gap-2">
+                        <h4 className="text-lg font-semibold text-gray-900 truncate flex-1">{activeMapHotel.name}</h4>
                         <div className={`px-2 py-1 rounded text-white text-sm flex-shrink-0 ${getRatingColor(activeMapHotel.rating)}`}>
                           {activeMapHotel.rating}
                         </div>
@@ -4657,509 +4771,26 @@ const CadreagoApp = () => {
     );
   };
 
-  // Mobile UI Component (for screens < 360px)
-  const MobileUI = () => {
-    const [activePage, setActivePage] = useState('home');
-
-    return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-b from-slate-100 to-slate-200 py-6">
-        {/* App Shell with Navigation Pages */}
-        <div className="w-[380px] h-[800px] max-w-full bg-white rounded-[40px] shadow-2xl overflow-hidden flex flex-col">
-          {/* Top Status Padding */}
-          <div className="h-4" />
-
-          {/* Simple top app bar for current page label */}
-          <div className="px-6 pb-3 flex items-center justify-between text-xs text-slate-500">
-            <span>Cadreago Mobile</span>
-            <span className="capitalize">{activePage}</span>
-          </div>
-
-          {/* PAGES WRAPPER */}
-          <div className="flex-1 overflow-hidden">
-            {/* HOME PAGE */}
-            {activePage === 'home' && (
-              <div className="h-full flex flex-col">
-                {/* Header / Location / Profile */}
-                <header className="px-6 pb-4 pt-1 flex items-center justify-between">
-                  <div className="flex flex-col text-xs">
-                    <span className="text-slate-400 font-medium">Current location</span>
-                    <span className="flex items-center gap-1 text-slate-700 font-semibold text-[13px]">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
-                      {searchParams.destination || 'Kochi, India'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xl font-semibold">
-                      <Menu size={20} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (isLoggedIn) {
-                          setActivePage('profile');
-                        } else {
-                          setShowAuthModal(true);
-                        }
-                      }}
-                      className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700"
-                    >
-                      {user ? user.full_name?.charAt(0).toUpperCase() : 'G'}
-                    </button>
-                  </div>
-                </header>
-
-                {/* Scrollable Content */}
-                <main className="flex-1 overflow-y-auto px-6 pb-4 space-y-6">
-                  {/* Greeting + Search */}
-                  <section className="space-y-4 pt-1">
-                    <div>
-                      <p className="text-[13px] text-slate-500">
-                        Hello {user?.full_name?.split(' ')[0] || 'Guest'},
-                      </p>
-                      <h1 className="text-xl font-semibold text-slate-900 leading-snug">
-                        Explore beautiful stays with Cadreago
-                      </h1>
-                    </div>
-
-                    {/* Search Bar */}
-                    <div
-                      onClick={() => setCurrentView('search')}
-                      className="flex items-center gap-2 bg-slate-100 rounded-2xl px-4 py-2.5 cursor-pointer"
-                    >
-                      <div className="flex-1">
-                        <p className="text-[11px] text-slate-400">Search stays</p>
-                        <p className="text-[13px] text-slate-700 truncate">
-                          {searchParams.destination || 'Destination, city, homestay name'}
-                        </p>
-                      </div>
-                      <button className="h-9 w-9 rounded-2xl bg-sky-500 flex items-center justify-center text-white text-lg">
-                        <Search size={18} />
-                      </button>
-                    </div>
-                  </section>
-
-                  {/* City Pills */}
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-slate-900">Explore city</h2>
-                      <button className="text-[11px] text-sky-500 font-medium">Change</button>
-                    </div>
-                    <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
-                      {["Kochi", "Kasaragod", "Bengaluru", "Munnar"].map((city, idx) => (
-                        <button
-                          key={city}
-                          onClick={() => {
-                            setSearchParams(prev => ({ ...prev, destination: city }));
-                          }}
-                          className={`px-4 py-1.5 rounded-full text-[13px] whitespace-nowrap border transition-colors ${
-                            searchParams.destination === city
-                              ? "bg-sky-500 text-white border-sky-500 shadow-sm"
-                              : "bg-white text-slate-600 border-slate-200"
-                          }`}
-                        >
-                          {city}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Experience 360 Section (horizontal cards) */}
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-slate-900">Featured Stays</h2>
-                      <button
-                        onClick={() => setCurrentView('search')}
-                        className="text-[11px] text-sky-500 font-medium"
-                      >
-                        View all
-                      </button>
-                    </div>
-                    <div className="flex gap-4 overflow-x-auto pb-1 hide-scrollbar">
-                      {hotels.slice(0, 3).map((hotel) => (
-                        <article
-                          key={hotel.id}
-                          onClick={() => {
-                            setSelectedHotel(hotel);
-                            setCurrentView('details');
-                          }}
-                          className="min-w-[250px] max-w-[250px] bg-white rounded-3xl shadow-md overflow-hidden flex-shrink-0 border border-slate-100 cursor-pointer"
-                        >
-                          {/* Image */}
-                          <div className="h-36 bg-slate-200 relative">
-                            {hotel.images && hotel.images.length > 0 && (
-                              <img
-                                src={hotel.images[0]}
-                                alt={hotel.name}
-                                className="w-full h-full object-cover"
-                              />
-                            )}
-                          </div>
-                          <div className="p-3.5 space-y-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <h3 className="text-sm font-semibold text-slate-900 truncate">
-                                {hotel.name}
-                              </h3>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleFavoriteToggle(hotel.id);
-                                }}
-                                className="h-7 w-7 rounded-full bg-white/80 flex items-center justify-center shadow text-[15px]"
-                              >
-                                <Heart
-                                  size={14}
-                                  className={favorites.includes(hotel.id) ? "fill-red-500 text-red-500" : "text-slate-400"}
-                                />
-                              </button>
-                            </div>
-                            <p className="text-[11px] text-slate-500">{hotel.location}</p>
-                            <div className="flex items-center justify-between pt-1.5">
-                              <div className="flex flex-col">
-                                <span className="text-[13px] font-semibold text-slate-900">
-                                  {formatCurrency(hotel.price_per_night)}
-                                  <span className="text-[11px] text-slate-500 font-normal">
-                                    /night
-                                  </span>
-                                </span>
-                                <span className="text-[11px] text-slate-400">Free cancellation</span>
-                              </div>
-                              <div className="text-right text-[11px] text-slate-500">
-                                <p className="font-medium text-slate-800 flex items-center gap-0.5">
-                                  <Star size={10} className="fill-yellow-400 text-yellow-400" />
-                                  {hotel.rating || '4.5'}
-                                </p>
-                                <p>{hotel.reviews_count || 0} reviews</p>
-                              </div>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-
-                  {/* Other Hotels (vertical list cards) */}
-                  <section className="space-y-3 pb-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-slate-900">Other stays</h2>
-                      <button
-                        onClick={() => setCurrentView('search')}
-                        className="text-[11px] text-sky-500 font-medium"
-                      >
-                        View all
-                      </button>
-                    </div>
-
-                    <div className="space-y-3">
-                      {hotels.slice(3, 5).map((hotel) => (
-                        <article
-                          key={hotel.id}
-                          onClick={() => {
-                            setSelectedHotel(hotel);
-                            setCurrentView('details');
-                          }}
-                          className="flex gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-2.5 shadow-sm cursor-pointer"
-                        >
-                          <div className="w-24 h-24 rounded-2xl bg-slate-200 flex-shrink-0 overflow-hidden">
-                            {hotel.images && hotel.images.length > 0 && (
-                              <img
-                                src={hotel.images[0]}
-                                alt={hotel.name}
-                                className="w-full h-full object-cover"
-                              />
-                            )}
-                          </div>
-                          <div className="flex-1 flex flex-col justify-between text-[12px]">
-                            <div>
-                              <h3 className="text-[13px] font-semibold text-slate-900 line-clamp-2">
-                                {hotel.name}
-                              </h3>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
-                                {hotel.location} • {hotel.max_guests} guests • {hotel.bedrooms} bedroom{hotel.bedrooms > 1 ? 's' : ''}
-                              </p>
-                            </div>
-                            <div className="flex items-end justify-between mt-2">
-                              <div className="flex flex-col">
-                                <span className="text-[13px] font-semibold text-slate-900">
-                                  {formatCurrency(hotel.price_per_night)}
-                                  <span className="text-[11px] text-slate-500 font-normal">
-                                    /night
-                                  </span>
-                                </span>
-                                <span className="text-[11px] text-slate-400">
-                                  Includes taxes & fees
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1 text-[11px] text-slate-600">
-                                <Star size={10} className="fill-yellow-400 text-yellow-400" />
-                                <span>{hotel.rating || '4.5'}</span>
-                                <span className="text-slate-400">({hotel.reviews_count || 0})</span>
-                              </div>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                </main>
-              </div>
-            )}
-
-            {/* FAVORITES PAGE */}
-            {activePage === 'favorites' && (
-              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Your Favorites</h2>
-                  <p className="text-[12px] text-slate-500">
-                    Properties you've saved for later
-                  </p>
-                </div>
-                {favorites.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-[13px] text-slate-500 space-y-3">
-                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
-                        <Heart size={32} className="text-slate-400" />
-                      </div>
-                      <p>No favorites yet.</p>
-                      <p className="text-slate-400">
-                        Start exploring and save your favorite stays.
-                      </p>
-                      <button
-                        onClick={() => setActivePage('home')}
-                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
-                      >
-                        Explore stays
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3 overflow-y-auto">
-                    {hotels.filter(h => favorites.includes(h.id)).map((hotel) => (
-                      <article
-                        key={hotel.id}
-                        onClick={() => {
-                          setSelectedHotel(hotel);
-                          setCurrentView('details');
-                        }}
-                        className="flex gap-3 rounded-3xl border border-slate-100 bg-white p-2.5 shadow-sm cursor-pointer"
-                      >
-                        <div className="w-24 h-24 rounded-2xl bg-slate-200 flex-shrink-0 overflow-hidden">
-                          {hotel.images && hotel.images.length > 0 && (
-                            <img
-                              src={hotel.images[0]}
-                              alt={hotel.name}
-                              className="w-full h-full object-cover"
-                            />
-                          )}
-                        </div>
-                        <div className="flex-1 flex flex-col justify-between text-[12px]">
-                          <div>
-                            <h3 className="text-[13px] font-semibold text-slate-900 line-clamp-2">
-                              {hotel.name}
-                            </h3>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {hotel.location}
-                            </p>
-                          </div>
-                          <div className="flex items-end justify-between mt-2">
-                            <span className="text-[13px] font-semibold text-slate-900">
-                              {formatCurrency(hotel.price_per_night)}
-                              <span className="text-[11px] text-slate-500 font-normal">/night</span>
-                            </span>
-                            <div className="flex items-center gap-1 text-[11px] text-slate-600">
-                              <Star size={10} className="fill-yellow-400 text-yellow-400" />
-                              <span>{hotel.rating || '4.5'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TRIPS PAGE */}
-            {activePage === 'trips' && (
-              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Your trips</h2>
-                  <p className="text-[12px] text-slate-500">
-                    {isLoggedIn
-                      ? "Your upcoming and past bookings"
-                      : "Sign in to view your trips"}
-                  </p>
-                </div>
-                {!isLoggedIn ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-[13px] text-slate-500 space-y-3">
-                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
-                        <User size={32} className="text-slate-400" />
-                      </div>
-                      <p>Sign in to view your trips.</p>
-                      <button
-                        onClick={() => setShowAuthModal(true)}
-                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
-                      >
-                        Sign in
-                      </button>
-                    </div>
-                  </div>
-                ) : userBookingsData.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-[13px] text-slate-500 space-y-3">
-                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
-                        <Calendar size={32} className="text-slate-400" />
-                      </div>
-                      <p>No trips yet.</p>
-                      <p className="text-slate-400">
-                        Start exploring to plan your first Cadreago trip.
-                      </p>
-                      <button
-                        onClick={() => setActivePage('home')}
-                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
-                      >
-                        Search stays
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3 overflow-y-auto">
-                    {userBookingsData.map((booking) => (
-                      <div key={booking.id} className="rounded-2xl bg-white border border-slate-100 p-3 shadow-sm">
-                        <div className="flex items-start gap-3">
-                          <div className="w-16 h-16 rounded-xl bg-slate-200 flex-shrink-0"></div>
-                          <div className="flex-1">
-                            <h3 className="text-[13px] font-semibold text-slate-900">
-                              {booking.hotel?.name}
-                            </h3>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {new Date(booking.check_in).toLocaleDateString()} - {new Date(booking.check_out).toLocaleDateString()}
-                            </p>
-                            <p className="text-[12px] font-medium text-slate-900 mt-1">
-                              {formatCurrency(booking.total_amount)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PROFILE PAGE */}
-            {activePage === 'profile' && (
-              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
-                {isLoggedIn ? (
-                  <>
-                    <div className="flex items-center gap-3 mt-2">
-                      <div className="h-12 w-12 rounded-full bg-slate-300 flex items-center justify-center text-lg font-semibold text-white">
-                        {user?.full_name?.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{user?.full_name}</p>
-                        <p className="text-[12px] text-slate-500">{user?.email}</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-[13px]">
-                      <button
-                        onClick={() => setCurrentView('dashboard')}
-                        className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left"
-                      >
-                        <span>Account settings</span>
-                        <span className="text-slate-400 text-xs">›</span>
-                      </button>
-                      <button className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left">
-                        <span>Payment methods</span>
-                        <span className="text-slate-400 text-xs">›</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (userType === 'guest') {
-                            setUserType('host');
-                            setCurrentView('host-dashboard');
-                          } else {
-                            setCurrentView('host-dashboard');
-                          }
-                        }}
-                        className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left"
-                      >
-                        <span>Host with Cadreago</span>
-                        <span className="text-slate-400 text-xs">›</span>
-                      </button>
-                      <button
-                        onClick={handleSignOut}
-                        className="w-full rounded-2xl bg-red-50 border border-red-200 p-3 flex items-center justify-center text-red-600 font-medium"
-                      >
-                        Sign out
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-[13px] text-slate-500 space-y-3">
-                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
-                        <User size={32} className="text-slate-400" />
-                      </div>
-                      <p>Sign in to access your profile.</p>
-                      <button
-                        onClick={() => setShowAuthModal(true)}
-                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
-                      >
-                        Sign in
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Navigation */}
-          <nav className="h-16 bg-white border-t border-slate-200 flex items-center justify-around px-4">
-            {[
-              { label: "Home", icon: MapPin },
-              { label: "Favorites", icon: Heart },
-              { label: "Trips", icon: Calendar },
-              { label: "Profile", icon: User },
-            ].map((item, index) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.label}
-                  onClick={() => setActivePage(item.label.toLowerCase())}
-                  className={`flex flex-col items-center justify-center gap-0.5 text-[11px] flex-1 ${
-                    activePage === item.label.toLowerCase()
-                      ? "text-sky-500 font-semibold"
-                      : "text-slate-400"
-                  }`}
-                >
-                  <div
-                    className={`h-7 w-7 rounded-full flex items-center justify-center mb-0.5 text-[12px] border ${
-                      activePage === item.label.toLowerCase()
-                        ? "bg-sky-50 border-sky-500"
-                        : "bg-white border-slate-200"
-                    }`}
-                  >
-                    <Icon size={14} />
-                  </div>
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      </div>
-    );
-  };
-
   // Conditional rendering based on screen size
   if (isMobile) {
     return (
-      <>
-        <MobileUI />
-        {/* Keep modals accessible */}
-        <AuthModal />
-      </>
+      <CadreagoMobileApp
+        hotels={hotels}
+        favorites={favorites}
+        user={user}
+        isLoggedIn={isLoggedIn}
+        searchParams={searchParams}
+        userBookingsData={userBookingsData}
+        formatCurrency={formatCurrency}
+        setSearchParams={setSearchParams}
+        setSelectedHotel={setSelectedHotel}
+        setCurrentView={setCurrentView}
+        handleFavoriteToggle={toggleFavorite}
+        setShowAuthModal={setShowAuthModal}
+        handleSignOut={handleLogout}
+        setUserType={setUserType}
+        userType={userType}
+      />
     );
   }
 
