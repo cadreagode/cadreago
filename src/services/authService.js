@@ -111,8 +111,12 @@ export const getCurrentUser = async () => {
       return { data: null, error: null };
     }
 
-    // Fetch profile
-    const { data: profileData, error: profileError } = await supabase
+    // Fetch profile - try with host_info first, fall back to basic profile
+    let profileData;
+    let profileError;
+
+    // Try fetching with host_info join
+    const { data: profileWithHost, error: errorWithHost } = await supabase
       .from('profiles')
       .select(`
         *,
@@ -120,6 +124,21 @@ export const getCurrentUser = async () => {
       `)
       .eq('id', user.id)
       .single();
+
+    if (errorWithHost) {
+      // If join fails, try fetching just the profile without host_info
+      const { data: basicProfile, error: basicError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      profileData = basicProfile;
+      profileError = basicError;
+    } else {
+      profileData = profileWithHost;
+      profileError = errorWithHost;
+    }
 
     if (profileError && profileError.code !== 'PGRST116') {
       console.error('Error fetching profile:', profileError);
