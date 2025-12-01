@@ -141,7 +141,7 @@ export const fetchHotels = async (filters = {}) => {
 
     // Apply filters if provided
     if (filters.destination) {
-      query = query.or(`location.ilike.%${filters.destination}%,city.ilike.%${filters.destination}%,country.ilike.%${filters.destination}%`);
+      query = query.or(`location.ilike.%${filters.destination}%,city.ilike.%${filters.destination}%,country.ilike.%${filters.destination}%,name.ilike.%${filters.destination}%`);
     }
 
     if (filters.minPrice && filters.maxPrice) {

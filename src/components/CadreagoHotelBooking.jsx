@@ -77,9 +77,18 @@ const CadreagoApp = () => {
   const [mapZoom, setMapZoom] = useState(6);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState('');
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const searchInputRef = useRef(null);
+  const searchInputRefDesktop = useRef(null);
+  const autocompleteRef = useRef(null);
+  const autocompleteRefDesktop = useRef(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPlace, setSelectedPlace] = useState(null);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [searchParams, setSearchParams] = useState({
-    destination: 'Miami',
+    destination: '',
     checkIn: '2025-03-12',
     checkOut: '2025-03-28',
     adults: 2,
@@ -91,15 +100,20 @@ const CadreagoApp = () => {
   const [hostBookingsData, setHostBookingsData] = useState([]);
   const [paymentsData, setPaymentsData] = useState([]);
   const [favoritesData, setFavoritesData] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [mapBounds, setMapBounds] = useState(null);
+  const [showMapViewHotels, setShowMapViewHotels] = useState(false);
 
   const popularDestinations = [
-    'Miami', 'Ibiza', 'New York', 'Paris', 'London', 
-    'Tokyo', 'Dubai', 'Barcelona', 'Rome', 'Maldives',
-    'Bali', 'Los Angeles', 'Singapore', 'Amsterdam'
+    'Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata',
+    'Hyderabad', 'Pune', 'Ahmedabad', 'Jaipur', 'Goa',
+    'Kerala', 'Udaipur', 'Agra', 'Varanasi', 'Rishikesh',
+    'Darjeeling', 'Shimla', 'Manali', 'Ooty', 'Coorg'
   ];
 
-  const filteredDestinations = popularDestinations.filter(dest => 
-    dest.toLowerCase().includes(searchParams.destination.toLowerCase())
+  const filteredDestinations = popularDestinations.filter(dest =>
+    dest.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Use Supabase data for user bookings (loaded in loadUserData function)
@@ -512,6 +526,28 @@ const CadreagoApp = () => {
     amenities: []
   });
 
+  // Load Google Maps API dynamically with proper API key
+  useEffect(() => {
+    const loadGoogleMaps = () => {
+      if (window.google) return; // Already loaded
+
+      const script = document.createElement('script');
+      const apiKey = process.env.REACT_APP_GOOGLE_MAPS_KEY;
+
+      // Use the new async loader pattern with stable weekly version
+      script.innerHTML = `
+        (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=\`https://maps.googleapis.com/maps/api/js?\`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+          key: "${apiKey}",
+          v: "weekly"
+        });
+      `;
+
+      document.head.appendChild(script);
+    };
+
+    loadGoogleMaps();
+  }, []);
+
   // Check for existing user session on mount
   useEffect(() => {
     const checkSession = async () => {
@@ -535,27 +571,472 @@ const CadreagoApp = () => {
     checkSession();
   }, []);
 
-  // Fetch hotels from Supabase on component mount
+  // Handle search button click - sync input values with search params
+  const handleSearch = () => {
+    // Get current input values from refs (since they're uncontrolled when autocomplete is loaded)
+    const mobileValue = searchInputRef.current?.value || searchQuery;
+    const desktopValue = searchInputRefDesktop.current?.value || searchQuery;
+    const destination = mobileValue || desktopValue;
+
+    // Update search params to trigger hotel fetch
+    setSearchParams(prev => ({
+      ...prev,
+      destination: destination
+    }));
+    setSearchQuery(destination);
+  };
+
+  // Load all properties on initial mount
   useEffect(() => {
-    const loadHotels = async () => {
+    const loadAllHotels = async () => {
       setHotelsLoading(true);
-      const { data, error } = await fetchHotels();
+      console.log('Loading all properties...');
+
+      // Fetch all hotels without filters
+      const { data, error } = await fetchHotels({});
       if (!error && data) {
         setHotels(data);
+        console.log(`Loaded ${data.length} properties total`, data);
       } else {
-        console.error('Error loading hotels:', error);
-        setHotels([]); // Set empty array on error
+        console.error('Error loading properties:', error);
+        setHotels([]);
       }
       setHotelsLoading(false);
     };
 
-    loadHotels();
+    loadAllHotels();
+  }, []); // Only run once on mount
+
+  // Handle zoom changes programmatically
+  useEffect(() => {
+    if (mapRef.current && mapRef.current.innerMap) {
+      mapRef.current.innerMap.setZoom(mapZoom);
+    }
+  }, [mapZoom]);
+
+  // Calculate distance between two coordinates (Haversine formula)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Filter hotels based on selected location from Google Places
+  const filteredHotels = React.useMemo(() => {
+    // If no search query, show all hotels
+    if (!searchParams.destination || searchParams.destination.trim() === '') {
+      console.log('No search query - showing all', hotels.length, 'properties');
+      return hotels;
+    }
+
+    // If Google Place was selected, use its location data
+    if (selectedPlace && selectedPlace.geometry) {
+      console.log('Filtering by Google Place:', selectedPlace);
+      console.log('Address components:', selectedPlace.address_components);
+
+      const searchLat = selectedPlace.geometry.location.lat();
+      const searchLng = selectedPlace.geometry.location.lng();
+
+      // Extract location components from Google Places
+      const placeComponents = {
+        city: selectedPlace.address_components?.find(c =>
+          c.types.includes('locality') || c.types.includes('administrative_area_level_2')
+        )?.long_name?.toLowerCase() || '',
+        state: selectedPlace.address_components?.find(c =>
+          c.types.includes('administrative_area_level_1')
+        )?.long_name?.toLowerCase() || '',
+        country: selectedPlace.address_components?.find(c =>
+          c.types.includes('country')
+        )?.long_name?.toLowerCase() || '',
+        // Also extract from formatted_address as fallback
+        placeName: selectedPlace.name?.toLowerCase() || '',
+        formattedAddress: selectedPlace.formatted_address?.toLowerCase() || ''
+      };
+
+      console.log('Place components:', placeComponents);
+
+      // Use larger radius for India (500km to cover entire states)
+      // Check if place is in India from address components OR formatted address
+      const isInIndia = placeComponents.country === 'india' ||
+                        placeComponents.formattedAddress.includes('india') ||
+                        placeComponents.formattedAddress.includes('kerala') ||
+                        placeComponents.formattedAddress.includes('karnataka') ||
+                        placeComponents.formattedAddress.includes('tamil nadu');
+      const radiusKm = isInIndia ? 500 : 100;
+      console.log('Search radius:', radiusKm, 'km', '- Is in India:', isInIndia);
+
+      const filtered = hotels.filter(hotel => {
+        // First try coordinate-based distance matching
+        if (hotel.coordinates) {
+          const distance = calculateDistance(
+            searchLat,
+            searchLng,
+            hotel.coordinates.lat,
+            hotel.coordinates.lng
+          );
+          console.log('Checking hotel:', hotel.name, '- Distance:', distance.toFixed(0), 'km', '- Radius:', radiusKm, 'km');
+          if (distance <= radiusKm) {
+            console.log('✓ Match by distance:', hotel.name, '-', distance.toFixed(0), 'km');
+            return true;
+          }
+        } else {
+          console.log('Checking hotel:', hotel.name, '- No coordinates');
+        }
+
+        // Fallback: Match by state/city/location text
+        const hotelLocation = hotel.location?.toLowerCase() || '';
+        const hotelCity = hotel.city?.toLowerCase() || '';
+        const hotelCountry = hotel.country?.toLowerCase() || '';
+        const hotelName = hotel.name?.toLowerCase() || '';
+
+        console.log('Hotel text fields:', {
+          name: hotel.name,
+          location: hotelLocation,
+          city: hotelCity,
+          country: hotelCountry
+        });
+
+        // Check if hotel matches place name or formatted address
+        const matchesPlaceName = placeComponents.placeName && (
+          hotelLocation.includes(placeComponents.placeName) ||
+          hotelCity.includes(placeComponents.placeName) ||
+          hotelName.includes(placeComponents.placeName)
+        );
+
+        // Check if hotel is in the same state or city
+        const matchesState = placeComponents.state && (
+          hotelLocation.includes(placeComponents.state) ||
+          placeComponents.formattedAddress.split(',').some(part =>
+            hotelLocation.includes(part.trim().toLowerCase())
+          )
+        );
+
+        const matchesCity = placeComponents.city && (
+          hotelCity.includes(placeComponents.city) ||
+          hotelLocation.includes(placeComponents.city)
+        );
+
+        const matchesCountry = placeComponents.country && hotelCountry.includes(placeComponents.country);
+
+        // For India, be more lenient - match if same country or state appears in location
+        if (isInIndia) {
+          // Extract state name from formatted address (e.g., "Kerala" from the address)
+          const addressParts = placeComponents.formattedAddress.split(',').map(p => p.trim());
+          const stateMatch = addressParts.some(part =>
+            hotelLocation.includes(part) || hotelCity.includes(part)
+          );
+
+          if (stateMatch) {
+            console.log('✓ Match by India state/location:', hotel.name, '- Location:', hotel.location);
+            return true;
+          }
+        }
+
+        if (matchesPlaceName || (matchesCountry && (matchesState || matchesCity))) {
+          console.log('✓ Match by location text:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
+          return true;
+        }
+
+        return false;
+      });
+
+      console.log('Filtered', filtered.length, 'properties for', selectedPlace.name);
+      return filtered;
+    }
+
+    // Fallback: Text-based search (when Google Places hasn't loaded or user typed manually)
+    const searchTerm = searchParams.destination.toLowerCase().trim();
+    console.log('Filtering by text search:', searchTerm);
+
+    const filtered = hotels.filter(hotel => {
+      const location = hotel.location?.toLowerCase() || '';
+      const city = hotel.city?.toLowerCase() || '';
+      const country = hotel.country?.toLowerCase() || '';
+      const name = hotel.name?.toLowerCase() || '';
+
+      const matches = location.includes(searchTerm) ||
+             city.includes(searchTerm) ||
+             country.includes(searchTerm) ||
+             name.includes(searchTerm);
+
+      if (matches) {
+        console.log('✓ Text match:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
+      }
+
+      return matches;
+    });
+
+    console.log('Filtered', filtered.length, 'properties by text search');
+    return filtered;
+  }, [hotels, selectedPlace, searchParams.destination]);
+
+  // Check if a coordinate is within map bounds
+  const isWithinBounds = (lat, lng, bounds) => {
+    if (!bounds) return false;
+    return lat >= bounds.south && lat <= bounds.north &&
+           lng >= bounds.west && lng <= bounds.east;
+  };
+
+  // Get hotels within current map view
+  const mapViewHotels = React.useMemo(() => {
+    if (!mapBounds || !showMapViewHotels) return [];
+
+    return hotels.filter(hotel => {
+      if (!hotel.coordinates) return false;
+      return isWithinBounds(hotel.coordinates.lat, hotel.coordinates.lng, mapBounds);
+    });
+  }, [hotels, mapBounds, showMapViewHotels]);
+
+  // Combined hotels list: show search results, or map view if no results
+  const displayedHotels = React.useMemo(() => {
+    if (filteredHotels.length > 0) {
+      return filteredHotels;
+    }
+    // If no search results, show hotels in current map view
+    if (mapViewHotels.length > 0 && showMapViewHotels) {
+      return mapViewHotels;
+    }
+    return filteredHotels; // Empty array
+  }, [filteredHotels, mapViewHotels, showMapViewHotels]);
+
+  // Reset showMapViewHotels when we have filtered results
+  useEffect(() => {
+    if (filteredHotels.length > 0 && showMapViewHotels) {
+      setShowMapViewHotels(false);
+    }
+  }, [filteredHotels.length, showMapViewHotels]);
+
+  // Update map center and zoom when filtered hotels change
+  useEffect(() => {
+    if (!mapRef.current?.innerMap || !displayedHotels.length) return;
+
+    const hotelsWithCoords = displayedHotels.filter(h => h.coordinates);
+    if (hotelsWithCoords.length === 0) return;
+
+    // If there's a selected place, center on it
+    if (selectedPlace && selectedPlace.geometry) {
+      const center = {
+        lat: selectedPlace.geometry.location.lat(),
+        lng: selectedPlace.geometry.location.lng()
+      };
+      mapRef.current.innerMap.setCenter(center);
+
+      // Adjust zoom based on number of properties
+      if (hotelsWithCoords.length === 1) {
+        mapRef.current.innerMap.setZoom(12);
+      } else if (hotelsWithCoords.length <= 3) {
+        mapRef.current.innerMap.setZoom(9);
+      } else {
+        mapRef.current.innerMap.setZoom(7);
+      }
+      return;
+    }
+
+    // Otherwise, fit bounds to show all displayed hotels
+    const bounds = new window.google.maps.LatLngBounds();
+    hotelsWithCoords.forEach(hotel => {
+      bounds.extend({
+        lat: hotel.coordinates.lat,
+        lng: hotel.coordinates.lng
+      });
+    });
+
+    mapRef.current.innerMap.fitBounds(bounds, 50); // 50px padding
+  }, [displayedHotels, selectedPlace]);
+
+  // Update map bounds when map is moved or zoomed
+  useEffect(() => {
+    const updateMapBounds = () => {
+      if (mapRef.current && mapRef.current.innerMap) {
+        const bounds = mapRef.current.innerMap.getBounds();
+        if (bounds) {
+          const ne = bounds.getNorthEast();
+          const sw = bounds.getSouthWest();
+          setMapBounds({
+            north: ne.lat(),
+            south: sw.lat(),
+            east: ne.lng(),
+            west: sw.lng()
+          });
+        }
+      }
+    };
+
+    if (mapRef.current && mapRef.current.innerMap) {
+      // Update bounds initially
+      updateMapBounds();
+
+      // Listen for map movements
+      const map = mapRef.current.innerMap;
+      const boundsListener = map.addListener('bounds_changed', updateMapBounds);
+
+      return () => {
+        if (boundsListener) {
+          window.google.maps.event.removeListener(boundsListener);
+        }
+      };
+    }
+  }, [mapLoaded]);
+
+  // Get user's current location on mount
+  useEffect(() => {
+    const getCurrentLocation = async () => {
+      if (!navigator.geolocation) {
+        console.log('Geolocation not supported');
+        return;
+      }
+
+      setLocationLoading(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          setCurrentLocation({ lat: latitude, lng: longitude });
+
+          // Reverse geocode to get city name
+          if (window.google?.maps?.importLibrary) {
+            try {
+              const { Geocoder } = await window.google.maps.importLibrary("geocoding");
+              const geocoder = new Geocoder();
+              const result = await geocoder.geocode({
+                location: { lat: latitude, lng: longitude }
+              });
+
+              if (result.results[0]) {
+                // Find city from address components
+                const addressComponents = result.results[0].address_components;
+                const city = addressComponents.find(c =>
+                  c.types.includes('locality') || c.types.includes('administrative_area_level_2')
+                );
+
+                if (city) {
+                  const cityName = city.long_name;
+                  setSearchQuery(cityName);
+                  setSearchParams(prev => ({ ...prev, destination: cityName }));
+                  setSelectedPlace({
+                    name: cityName,
+                    geometry: {
+                      location: {
+                        lat: () => latitude,
+                        lng: () => longitude
+                      }
+                    },
+                    formatted_address: result.results[0].formatted_address,
+                    address_components: addressComponents // Include address components!
+                  });
+                }
+              }
+            } catch (error) {
+              console.log('Geocoding failed:', error.message);
+            }
+          }
+          setLocationLoading(false);
+        },
+        (error) => {
+          console.log('Location access denied or failed:', error.message);
+          setLocationLoading(false);
+        },
+        { timeout: 10000, enableHighAccuracy: true }
+      );
+    };
+
+    // Only get location once on mount
+    getCurrentLocation();
+  }, []);
+
+  // Initialize Google Places Autocomplete with new async loading
+  useEffect(() => {
+    const initAutocomplete = async () => {
+      try {
+        // Use the new importLibrary API for proper async loading
+        const { Autocomplete } = await window.google.maps.importLibrary("places");
+
+        const autocompleteOptions = {
+          types: ['(cities)'],
+          fields: ['name', 'geometry', 'formatted_address', 'address_components'],
+          componentRestrictions: { country: 'in' }
+        };
+
+        // Initialize mobile autocomplete
+        if (searchInputRef.current && !autocompleteRef.current) {
+          // Set initial value before Autocomplete takes over
+          searchInputRef.current.value = searchQuery;
+
+          const mobileAc = new Autocomplete(searchInputRef.current, autocompleteOptions);
+          autocompleteRef.current = mobileAc;
+
+          mobileAc.addListener('place_changed', () => {
+            const place = mobileAc.getPlace();
+            console.log('Mobile autocomplete place selected:', place);
+            if (place.geometry) {
+              const cityName = place.name || place.formatted_address;
+              setSearchQuery(cityName);
+              setSearchParams(prev => ({...prev, destination: cityName}));
+              setSelectedPlace(place);
+              setShowDestinations(false);
+            }
+          });
+        }
+
+        // Initialize desktop autocomplete
+        if (searchInputRefDesktop.current && !autocompleteRefDesktop.current) {
+          // Set initial value before Autocomplete takes over
+          searchInputRefDesktop.current.value = searchQuery;
+
+          const desktopAc = new Autocomplete(searchInputRefDesktop.current, autocompleteOptions);
+          autocompleteRefDesktop.current = desktopAc;
+
+          desktopAc.addListener('place_changed', () => {
+            const place = desktopAc.getPlace();
+            console.log('Desktop autocomplete place selected:', place);
+            if (place.geometry) {
+              const cityName = place.name || place.formatted_address;
+              setSearchQuery(cityName);
+              setSearchParams(prev => ({...prev, destination: cityName}));
+              setSelectedPlace(place);
+              setShowDestinations(false);
+            }
+          });
+        }
+      } catch (error) {
+        // Handle autocomplete errors (e.g., API key issues)
+        console.debug('Places Autocomplete not available:', error.message);
+      }
+    };
+
+    // Initialize when Google Maps is available
+    if (window.google?.maps?.importLibrary) {
+      initAutocomplete();
+    } else {
+      // Wait for Google Maps to load
+      const checkGoogle = setInterval(() => {
+        if (window.google?.maps?.importLibrary) {
+          initAutocomplete();
+          clearInterval(checkGoogle);
+        }
+      }, 100);
+
+      return () => clearInterval(checkGoogle);
+    }
   }, []);
 
   const initialMapCenter = React.useMemo(() => {
-    const withCoordinates = hotels.find(hotel => hotel.coordinates);
+    // Use selected place location if available
+    if (selectedPlace && selectedPlace.geometry) {
+      return {
+        lat: selectedPlace.geometry.location.lat(),
+        lng: selectedPlace.geometry.location.lng()
+      };
+    }
+    // Otherwise use first hotel with coordinates
+    const withCoordinates = displayedHotels.find(hotel => hotel.coordinates);
     return withCoordinates?.coordinates || { lat: 20.5937, lng: 78.9629 };
-  }, [hotels]);
+  }, [selectedPlace, displayedHotels]);
 
   const toggleFavorite = async (hotelId) => {
     if (!isLoggedIn || !user?.id) {
@@ -592,7 +1073,7 @@ const CadreagoApp = () => {
 
   const getRatingBarWidth = (score) => `${(score / 10) * 100}%`;
 
-  // Web Components approach - no complex initialization needed
+  // Initialize Google Maps JavaScript API
   useEffect(() => {
     const apiKey = process.env.REACT_APP_GOOGLE_MAPS_KEY;
 
@@ -601,8 +1082,7 @@ const CadreagoApp = () => {
       return;
     }
 
-    // Web Components load automatically from the script tag in index.html
-    // Just wait for the API to be ready
+    // Wait for the API to be ready
     const checkGoogleMapsReady = () => {
       if (window.google?.maps) {
         setMapLoaded(true);
@@ -615,6 +1095,178 @@ const CadreagoApp = () => {
 
     checkGoogleMapsReady();
   }, []);
+
+  // Initialize the map instance
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current || mapInstanceRef.current) return;
+
+    const initMap = async () => {
+      try {
+        // Import the maps library
+        const { Map } = await window.google.maps.importLibrary("maps");
+
+        const mapId = process.env.REACT_APP_GOOGLE_MAPS_MAP_ID;
+
+        // Create the map with a default center (India's center)
+        const map = new Map(mapRef.current, {
+          center: { lat: 20.5937, lng: 78.9629 },
+          zoom: mapZoom,
+          mapId: mapId,
+          disableDefaultUI: false,
+          zoomControl: false,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+        });
+
+        mapInstanceRef.current = map;
+
+        // Add click listener to deselect hotel
+        map.addListener('click', () => {
+          setMapSelectedHotel(null);
+        });
+      } catch (error) {
+        console.error('Error initializing map:', error);
+        setMapError('Failed to initialize map');
+      }
+    };
+
+    initMap();
+  }, [mapLoaded]);
+
+  // Update map center when initialMapCenter changes (without reinitializing the map)
+  useEffect(() => {
+    if (mapInstanceRef.current && initialMapCenter) {
+      mapInstanceRef.current.setCenter(initialMapCenter);
+    }
+  }, [initialMapCenter]);
+
+  // Create hotel IDs string to detect actual hotel list changes
+  const displayedHotelIds = React.useMemo(() =>
+    displayedHotels.map(h => h.id).join(','),
+    [displayedHotels]
+  );
+
+  // Create and update markers - only when hotel list changes
+  useEffect(() => {
+    if (!mapInstanceRef.current || displayedHotels.length === 0) return;
+
+    const createMarkers = async () => {
+      try {
+        // Import the marker library
+        const { AdvancedMarkerElement } = await window.google.maps.importLibrary("marker");
+
+        // Clear existing markers
+        markersRef.current.forEach((item) => {
+          // Handle both old format (direct marker) and new format (object with marker)
+          const marker = item.marker || item;
+          if (marker && marker.map !== undefined) {
+            marker.map = null;
+          }
+        });
+        markersRef.current = [];
+
+        console.log(`Creating ${displayedHotels.length} markers`);
+
+        // Create new markers for displayed hotels
+        displayedHotels.forEach((hotel) => {
+          if (!hotel.coordinates) {
+            return;
+          }
+
+          const priceLabel = formatCurrency(hotel.price, hotel.currency);
+
+          // Create price tag element
+          const priceTag = document.createElement('div');
+          priceTag.className = 'price-marker';
+          priceTag.innerHTML = priceLabel;
+          priceTag.dataset.hotelId = hotel.id; // Store hotel ID for later reference
+
+          // Apply base styles
+          Object.assign(priceTag.style, {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '8px 16px',
+            borderRadius: '999px',
+            backgroundColor: '#ffffff',
+            color: '#0f172a',
+            fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fontWeight: '700',
+            fontSize: '15px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12)',
+            border: '2px solid #e5e7eb',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            whiteSpace: 'nowrap',
+            lineHeight: '1.2',
+            letterSpacing: '-0.01em',
+          });
+
+          // Add hover effects
+          priceTag.addEventListener('mouseenter', () => {
+            if (priceTag.style.backgroundColor === 'rgb(255, 255, 255)') {
+              priceTag.style.backgroundColor = '#f3f4f6';
+              priceTag.style.transform = 'scale(1.05)';
+            }
+          });
+
+          priceTag.addEventListener('mouseleave', () => {
+            if (priceTag.style.backgroundColor === 'rgb(243, 244, 246)') {
+              priceTag.style.backgroundColor = '#ffffff';
+              priceTag.style.transform = 'scale(1)';
+            }
+          });
+
+          // Create the advanced marker
+          const marker = new AdvancedMarkerElement({
+            map: mapInstanceRef.current,
+            position: { lat: hotel.coordinates.lat, lng: hotel.coordinates.lng },
+            content: priceTag,
+            title: hotel.name,
+          });
+
+          // Add click listener
+          marker.addListener('click', () => {
+            setMapSelectedHotel(hotel);
+          });
+
+          // Store marker with hotel reference
+          markersRef.current.push({ marker, hotel, priceTag });
+        });
+      } catch (error) {
+        console.error('Error creating markers:', error);
+      }
+    };
+
+    createMarkers();
+  }, [displayedHotelIds]); // Only recreate when hotel IDs change
+
+  // Update marker styles when selection changes (without recreating markers)
+  useEffect(() => {
+    if (markersRef.current.length === 0) return;
+
+    markersRef.current.forEach(({ priceTag, hotel }) => {
+      const isActive = mapSelectedHotel?.id === hotel.id;
+
+      if (isActive) {
+        priceTag.style.backgroundColor = '#2563eb';
+        priceTag.style.color = '#ffffff';
+        priceTag.style.border = '2px solid #1d4ed8';
+      } else {
+        priceTag.style.backgroundColor = '#ffffff';
+        priceTag.style.color = '#0f172a';
+        priceTag.style.border = '2px solid #e5e7eb';
+      }
+    });
+  }, [mapSelectedHotel]);
+
+  // Update map zoom
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setZoom(mapZoom);
+    }
+  }, [mapZoom]);
 
   // Guest Selector Component
   const GuestSelector = ({ show, onClose }) => {
@@ -1221,24 +1873,36 @@ const CadreagoApp = () => {
                 <div className="relative">
                   <MapPin className="absolute left-3 top-3 text-gray-400" size={18} />
                   <input
+                    ref={searchInputRefDesktop}
                     type="text"
-                    value={searchParams.destination}
+                    defaultValue={searchQuery}
                     onChange={(e) => {
-                      setSearchParams({...searchParams, destination: e.target.value});
-                      setShowDestinations(true);
+                      // Only show manual dropdown if autocomplete hasn't loaded
+                      if (!autocompleteRefDesktop.current) {
+                        const value = e.target.value;
+                        setSearchQuery(value);
+                        setSearchParams(prev => ({...prev, destination: value}));
+                        setShowDestinations(true);
+                      }
                     }}
-                    onFocus={() => setShowDestinations(true)}
+                    onFocus={() => {
+                      // Only show manual dropdown if autocomplete hasn't loaded
+                      if (!autocompleteRefDesktop.current) {
+                        setShowDestinations(true);
+                      }
+                    }}
                     onBlur={() => setTimeout(() => setShowDestinations(false), 200)}
                     placeholder="Where are you going?"
                     className="w-full pl-10 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
                   />
-                  {showDestinations && filteredDestinations.length > 0 && (
+                  {showDestinations && filteredDestinations.length > 0 && !autocompleteRefDesktop.current && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                       {filteredDestinations.map((dest, idx) => (
                         <button
                           key={idx}
                           type="button"
                           onClick={() => {
+                            setSearchQuery(dest);
                             setSearchParams({...searchParams, destination: dest});
                             setShowDestinations(false);
                           }}
@@ -1298,8 +1962,11 @@ const CadreagoApp = () => {
               </div>
             </div>
 
-            <button 
-              onClick={() => setCurrentView('search')}
+            <button
+              onClick={() => {
+                handleSearch();
+                setCurrentView('search');
+              }}
               className="w-full md:w-auto px-12 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-lg shadow-lg"
             >
               Search
@@ -1528,24 +2195,36 @@ const CadreagoApp = () => {
               <div className="relative">
                 <MapPin className="absolute left-3 top-3 text-gray-400" size={18} />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  value={searchParams.destination}
+                  defaultValue={searchQuery}
                   onChange={(e) => {
-                    setSearchParams({...searchParams, destination: e.target.value});
-                    setShowDestinations(true);
+                    // Only show manual dropdown if autocomplete hasn't loaded
+                    if (!autocompleteRef.current) {
+                      const value = e.target.value;
+                      setSearchQuery(value);
+                      setSearchParams(prev => ({...prev, destination: value}));
+                      setShowDestinations(true);
+                    }
                   }}
-                  onFocus={() => setShowDestinations(true)}
+                  onFocus={() => {
+                    // Only show manual dropdown if autocomplete hasn't loaded
+                    if (!autocompleteRef.current) {
+                      setShowDestinations(true);
+                    }
+                  }}
                   onBlur={() => setTimeout(() => setShowDestinations(false), 200)}
                   placeholder="Where are you going?"
                   className="w-full pl-10 pr-3 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm md:text-base"
                 />
-                {showDestinations && filteredDestinations.length > 0 && (
+                {showDestinations && filteredDestinations.length > 0 && !autocompleteRef.current && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                     {filteredDestinations.map((dest, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => {
+                          setSearchQuery(dest);
                           setSearchParams({...searchParams, destination: dest});
                           setShowDestinations(false);
                         }}
@@ -1604,7 +2283,10 @@ const CadreagoApp = () => {
             </div>
           </div>
 
-          <button className="w-full md:w-auto px-8 md:px-10 py-2.5 md:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm md:text-base">
+          <button
+            onClick={handleSearch}
+            className="w-full md:w-auto px-8 md:px-10 py-2.5 md:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm md:text-base"
+          >
             Search
           </button>
         </div>
@@ -1669,9 +2351,39 @@ const CadreagoApp = () => {
             </div>
 
             <div className="space-y-4 md:space-y-6">
-              {hotels.map(hotel => (
-                <HotelCard key={hotel.id} hotel={hotel} />
-              ))}
+              {displayedHotels.length > 0 ? (
+                <>
+                  {showMapViewHotels && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                      <p className="text-blue-800 text-sm font-medium">
+                        Showing {mapViewHotels.length} {mapViewHotels.length === 1 ? 'property' : 'properties'} in the current map view
+                      </p>
+                      <button
+                        onClick={() => setShowMapViewHotels(false)}
+                        className="text-blue-600 text-sm underline mt-1 hover:text-blue-800"
+                      >
+                        Clear and search again
+                      </button>
+                    </div>
+                  )}
+                  {displayedHotels.map(hotel => (
+                    <HotelCard key={hotel.id} hotel={hotel} />
+                  ))}
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-500 text-lg mb-3">No hotels found in this location</p>
+                  <p className="text-gray-400 text-sm mb-4">Try searching for a different destination</p>
+                  {mapBounds && hotels.some(h => h.coordinates) && (
+                    <button
+                      onClick={() => setShowMapViewHotels(true)}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold shadow-md"
+                    >
+                      Show properties in current map view
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1728,60 +2440,12 @@ const CadreagoApp = () => {
                   </div>
                 )}
 
-                {/* Google Maps Web Component */}
-                {mapLoaded && !mapError && (
-                  <gmp-map
-                    center={`${initialMapCenter.lat},${initialMapCenter.lng}`}
-                    zoom={mapZoom.toString()}
-                    map-id={process.env.REACT_APP_GOOGLE_MAPS_MAP_ID || ''}
-                    style={{ width: '100%', height: '100%' }}
-                    onClick={() => setMapSelectedHotel(null)}
-                  >
-                    {hotels.map((hotel) => {
-                      if (!hotel.coordinates) return null;
-
-                      const priceLabel = formatCurrency(hotel.price, hotel.currency);
-                      const isActive = mapSelectedHotel?.id === hotel.id;
-
-                      return (
-                        <gmp-advanced-marker
-                          key={hotel.id}
-                          position={`${hotel.coordinates.lat},${hotel.coordinates.lng}`}
-                          title={hotel.name}
-                          z-index={isActive ? 2 : 1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMapSelectedHotel(hotel);
-                          }}
-                        >
-                          <div
-                            style={{
-                              position: 'relative',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              padding: '6px 14px 10px',
-                              borderRadius: '999px',
-                              background: isActive ? '#2563eb' : '#ffffff',
-                              color: isActive ? '#f8fafc' : '#0f172a',
-                              fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                              fontWeight: '600',
-                              boxShadow: '0 10px 30px rgba(15,23,42,0.18)',
-                              border: `1px solid ${isActive ? '#1d4ed8' : '#d1d5db'}`,
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease',
-                              fontSize: '14px',
-                              whiteSpace: 'nowrap'
-                            }}
-                          >
-                            {priceLabel}
-                          </div>
-                        </gmp-advanced-marker>
-                      );
-                    })}
-                  </gmp-map>
-                )}
+                {/* Google Maps JavaScript API */}
+                <div
+                  ref={mapRef}
+                  style={{ width: '100%', height: '100%' }}
+                  className="rounded-2xl"
+                />
 
                 {/* Property card overlay - positioned absolutely so it doesn't affect map height */}
                 {activeMapHotel && (
@@ -3992,6 +4656,512 @@ const CadreagoApp = () => {
       </div>
     );
   };
+
+  // Mobile UI Component (for screens < 360px)
+  const MobileUI = () => {
+    const [activePage, setActivePage] = useState('home');
+
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-b from-slate-100 to-slate-200 py-6">
+        {/* App Shell with Navigation Pages */}
+        <div className="w-[380px] h-[800px] max-w-full bg-white rounded-[40px] shadow-2xl overflow-hidden flex flex-col">
+          {/* Top Status Padding */}
+          <div className="h-4" />
+
+          {/* Simple top app bar for current page label */}
+          <div className="px-6 pb-3 flex items-center justify-between text-xs text-slate-500">
+            <span>Cadreago Mobile</span>
+            <span className="capitalize">{activePage}</span>
+          </div>
+
+          {/* PAGES WRAPPER */}
+          <div className="flex-1 overflow-hidden">
+            {/* HOME PAGE */}
+            {activePage === 'home' && (
+              <div className="h-full flex flex-col">
+                {/* Header / Location / Profile */}
+                <header className="px-6 pb-4 pt-1 flex items-center justify-between">
+                  <div className="flex flex-col text-xs">
+                    <span className="text-slate-400 font-medium">Current location</span>
+                    <span className="flex items-center gap-1 text-slate-700 font-semibold text-[13px]">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500" />
+                      {searchParams.destination || 'Kochi, India'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xl font-semibold">
+                      <Menu size={20} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (isLoggedIn) {
+                          setActivePage('profile');
+                        } else {
+                          setShowAuthModal(true);
+                        }
+                      }}
+                      className="h-9 w-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700"
+                    >
+                      {user ? user.full_name?.charAt(0).toUpperCase() : 'G'}
+                    </button>
+                  </div>
+                </header>
+
+                {/* Scrollable Content */}
+                <main className="flex-1 overflow-y-auto px-6 pb-4 space-y-6">
+                  {/* Greeting + Search */}
+                  <section className="space-y-4 pt-1">
+                    <div>
+                      <p className="text-[13px] text-slate-500">
+                        Hello {user?.full_name?.split(' ')[0] || 'Guest'},
+                      </p>
+                      <h1 className="text-xl font-semibold text-slate-900 leading-snug">
+                        Explore beautiful stays with Cadreago
+                      </h1>
+                    </div>
+
+                    {/* Search Bar */}
+                    <div
+                      onClick={() => setCurrentView('search')}
+                      className="flex items-center gap-2 bg-slate-100 rounded-2xl px-4 py-2.5 cursor-pointer"
+                    >
+                      <div className="flex-1">
+                        <p className="text-[11px] text-slate-400">Search stays</p>
+                        <p className="text-[13px] text-slate-700 truncate">
+                          {searchParams.destination || 'Destination, city, homestay name'}
+                        </p>
+                      </div>
+                      <button className="h-9 w-9 rounded-2xl bg-sky-500 flex items-center justify-center text-white text-lg">
+                        <Search size={18} />
+                      </button>
+                    </div>
+                  </section>
+
+                  {/* City Pills */}
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-900">Explore city</h2>
+                      <button className="text-[11px] text-sky-500 font-medium">Change</button>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                      {["Kochi", "Kasaragod", "Bengaluru", "Munnar"].map((city, idx) => (
+                        <button
+                          key={city}
+                          onClick={() => {
+                            setSearchParams(prev => ({ ...prev, destination: city }));
+                          }}
+                          className={`px-4 py-1.5 rounded-full text-[13px] whitespace-nowrap border transition-colors ${
+                            searchParams.destination === city
+                              ? "bg-sky-500 text-white border-sky-500 shadow-sm"
+                              : "bg-white text-slate-600 border-slate-200"
+                          }`}
+                        >
+                          {city}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Experience 360 Section (horizontal cards) */}
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-900">Featured Stays</h2>
+                      <button
+                        onClick={() => setCurrentView('search')}
+                        className="text-[11px] text-sky-500 font-medium"
+                      >
+                        View all
+                      </button>
+                    </div>
+                    <div className="flex gap-4 overflow-x-auto pb-1 hide-scrollbar">
+                      {hotels.slice(0, 3).map((hotel) => (
+                        <article
+                          key={hotel.id}
+                          onClick={() => {
+                            setSelectedHotel(hotel);
+                            setCurrentView('details');
+                          }}
+                          className="min-w-[250px] max-w-[250px] bg-white rounded-3xl shadow-md overflow-hidden flex-shrink-0 border border-slate-100 cursor-pointer"
+                        >
+                          {/* Image */}
+                          <div className="h-36 bg-slate-200 relative">
+                            {hotel.images && hotel.images.length > 0 && (
+                              <img
+                                src={hotel.images[0]}
+                                alt={hotel.name}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </div>
+                          <div className="p-3.5 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <h3 className="text-sm font-semibold text-slate-900 truncate">
+                                {hotel.name}
+                              </h3>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFavoriteToggle(hotel.id);
+                                }}
+                                className="h-7 w-7 rounded-full bg-white/80 flex items-center justify-center shadow text-[15px]"
+                              >
+                                <Heart
+                                  size={14}
+                                  className={favorites.includes(hotel.id) ? "fill-red-500 text-red-500" : "text-slate-400"}
+                                />
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-500">{hotel.location}</p>
+                            <div className="flex items-center justify-between pt-1.5">
+                              <div className="flex flex-col">
+                                <span className="text-[13px] font-semibold text-slate-900">
+                                  {formatCurrency(hotel.price_per_night)}
+                                  <span className="text-[11px] text-slate-500 font-normal">
+                                    /night
+                                  </span>
+                                </span>
+                                <span className="text-[11px] text-slate-400">Free cancellation</span>
+                              </div>
+                              <div className="text-right text-[11px] text-slate-500">
+                                <p className="font-medium text-slate-800 flex items-center gap-0.5">
+                                  <Star size={10} className="fill-yellow-400 text-yellow-400" />
+                                  {hotel.rating || '4.5'}
+                                </p>
+                                <p>{hotel.reviews_count || 0} reviews</p>
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Other Hotels (vertical list cards) */}
+                  <section className="space-y-3 pb-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-slate-900">Other stays</h2>
+                      <button
+                        onClick={() => setCurrentView('search')}
+                        className="text-[11px] text-sky-500 font-medium"
+                      >
+                        View all
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {hotels.slice(3, 5).map((hotel) => (
+                        <article
+                          key={hotel.id}
+                          onClick={() => {
+                            setSelectedHotel(hotel);
+                            setCurrentView('details');
+                          }}
+                          className="flex gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-2.5 shadow-sm cursor-pointer"
+                        >
+                          <div className="w-24 h-24 rounded-2xl bg-slate-200 flex-shrink-0 overflow-hidden">
+                            {hotel.images && hotel.images.length > 0 && (
+                              <img
+                                src={hotel.images[0]}
+                                alt={hotel.name}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </div>
+                          <div className="flex-1 flex flex-col justify-between text-[12px]">
+                            <div>
+                              <h3 className="text-[13px] font-semibold text-slate-900 line-clamp-2">
+                                {hotel.name}
+                              </h3>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {hotel.location} • {hotel.max_guests} guests • {hotel.bedrooms} bedroom{hotel.bedrooms > 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            <div className="flex items-end justify-between mt-2">
+                              <div className="flex flex-col">
+                                <span className="text-[13px] font-semibold text-slate-900">
+                                  {formatCurrency(hotel.price_per_night)}
+                                  <span className="text-[11px] text-slate-500 font-normal">
+                                    /night
+                                  </span>
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                  Includes taxes & fees
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[11px] text-slate-600">
+                                <Star size={10} className="fill-yellow-400 text-yellow-400" />
+                                <span>{hotel.rating || '4.5'}</span>
+                                <span className="text-slate-400">({hotel.reviews_count || 0})</span>
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                </main>
+              </div>
+            )}
+
+            {/* FAVORITES PAGE */}
+            {activePage === 'favorites' && (
+              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Your Favorites</h2>
+                  <p className="text-[12px] text-slate-500">
+                    Properties you've saved for later
+                  </p>
+                </div>
+                {favorites.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-[13px] text-slate-500 space-y-3">
+                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
+                        <Heart size={32} className="text-slate-400" />
+                      </div>
+                      <p>No favorites yet.</p>
+                      <p className="text-slate-400">
+                        Start exploring and save your favorite stays.
+                      </p>
+                      <button
+                        onClick={() => setActivePage('home')}
+                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
+                      >
+                        Explore stays
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 overflow-y-auto">
+                    {hotels.filter(h => favorites.includes(h.id)).map((hotel) => (
+                      <article
+                        key={hotel.id}
+                        onClick={() => {
+                          setSelectedHotel(hotel);
+                          setCurrentView('details');
+                        }}
+                        className="flex gap-3 rounded-3xl border border-slate-100 bg-white p-2.5 shadow-sm cursor-pointer"
+                      >
+                        <div className="w-24 h-24 rounded-2xl bg-slate-200 flex-shrink-0 overflow-hidden">
+                          {hotel.images && hotel.images.length > 0 && (
+                            <img
+                              src={hotel.images[0]}
+                              alt={hotel.name}
+                              className="w-full h-full object-cover"
+                            />
+                          )}
+                        </div>
+                        <div className="flex-1 flex flex-col justify-between text-[12px]">
+                          <div>
+                            <h3 className="text-[13px] font-semibold text-slate-900 line-clamp-2">
+                              {hotel.name}
+                            </h3>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {hotel.location}
+                            </p>
+                          </div>
+                          <div className="flex items-end justify-between mt-2">
+                            <span className="text-[13px] font-semibold text-slate-900">
+                              {formatCurrency(hotel.price_per_night)}
+                              <span className="text-[11px] text-slate-500 font-normal">/night</span>
+                            </span>
+                            <div className="flex items-center gap-1 text-[11px] text-slate-600">
+                              <Star size={10} className="fill-yellow-400 text-yellow-400" />
+                              <span>{hotel.rating || '4.5'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TRIPS PAGE */}
+            {activePage === 'trips' && (
+              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Your trips</h2>
+                  <p className="text-[12px] text-slate-500">
+                    {isLoggedIn
+                      ? "Your upcoming and past bookings"
+                      : "Sign in to view your trips"}
+                  </p>
+                </div>
+                {!isLoggedIn ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-[13px] text-slate-500 space-y-3">
+                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
+                        <User size={32} className="text-slate-400" />
+                      </div>
+                      <p>Sign in to view your trips.</p>
+                      <button
+                        onClick={() => setShowAuthModal(true)}
+                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  </div>
+                ) : userBookingsData.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-[13px] text-slate-500 space-y-3">
+                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
+                        <Calendar size={32} className="text-slate-400" />
+                      </div>
+                      <p>No trips yet.</p>
+                      <p className="text-slate-400">
+                        Start exploring to plan your first Cadreago trip.
+                      </p>
+                      <button
+                        onClick={() => setActivePage('home')}
+                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
+                      >
+                        Search stays
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 overflow-y-auto">
+                    {userBookingsData.map((booking) => (
+                      <div key={booking.id} className="rounded-2xl bg-white border border-slate-100 p-3 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <div className="w-16 h-16 rounded-xl bg-slate-200 flex-shrink-0"></div>
+                          <div className="flex-1">
+                            <h3 className="text-[13px] font-semibold text-slate-900">
+                              {booking.hotel?.name}
+                            </h3>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {new Date(booking.check_in).toLocaleDateString()} - {new Date(booking.check_out).toLocaleDateString()}
+                            </p>
+                            <p className="text-[12px] font-medium text-slate-900 mt-1">
+                              {formatCurrency(booking.total_amount)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* PROFILE PAGE */}
+            {activePage === 'profile' && (
+              <div className="h-full flex flex-col bg-slate-50 px-6 pb-4 pt-2 space-y-4">
+                {isLoggedIn ? (
+                  <>
+                    <div className="flex items-center gap-3 mt-2">
+                      <div className="h-12 w-12 rounded-full bg-slate-300 flex items-center justify-center text-lg font-semibold text-white">
+                        {user?.full_name?.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{user?.full_name}</p>
+                        <p className="text-[12px] text-slate-500">{user?.email}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-[13px]">
+                      <button
+                        onClick={() => setCurrentView('dashboard')}
+                        className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left"
+                      >
+                        <span>Account settings</span>
+                        <span className="text-slate-400 text-xs">›</span>
+                      </button>
+                      <button className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left">
+                        <span>Payment methods</span>
+                        <span className="text-slate-400 text-xs">›</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (userType === 'guest') {
+                            setUserType('host');
+                            setCurrentView('host-dashboard');
+                          } else {
+                            setCurrentView('host-dashboard');
+                          }
+                        }}
+                        className="w-full rounded-2xl bg-white border border-slate-100 p-3 flex items-center justify-between text-left"
+                      >
+                        <span>Host with Cadreago</span>
+                        <span className="text-slate-400 text-xs">›</span>
+                      </button>
+                      <button
+                        onClick={handleSignOut}
+                        className="w-full rounded-2xl bg-red-50 border border-red-200 p-3 flex items-center justify-center text-red-600 font-medium"
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-[13px] text-slate-500 space-y-3">
+                      <div className="mx-auto h-24 w-24 rounded-full bg-slate-200 flex items-center justify-center">
+                        <User size={32} className="text-slate-400" />
+                      </div>
+                      <p>Sign in to access your profile.</p>
+                      <button
+                        onClick={() => setShowAuthModal(true)}
+                        className="mt-2 px-4 py-2 rounded-full bg-sky-500 text-white text-[12px] font-medium"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Navigation */}
+          <nav className="h-16 bg-white border-t border-slate-200 flex items-center justify-around px-4">
+            {[
+              { label: "Home", icon: MapPin },
+              { label: "Favorites", icon: Heart },
+              { label: "Trips", icon: Calendar },
+              { label: "Profile", icon: User },
+            ].map((item, index) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  onClick={() => setActivePage(item.label.toLowerCase())}
+                  className={`flex flex-col items-center justify-center gap-0.5 text-[11px] flex-1 ${
+                    activePage === item.label.toLowerCase()
+                      ? "text-sky-500 font-semibold"
+                      : "text-slate-400"
+                  }`}
+                >
+                  <div
+                    className={`h-7 w-7 rounded-full flex items-center justify-center mb-0.5 text-[12px] border ${
+                      activePage === item.label.toLowerCase()
+                        ? "bg-sky-50 border-sky-500"
+                        : "bg-white border-slate-200"
+                    }`}
+                  >
+                    <Icon size={14} />
+                  </div>
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+    );
+  };
+
+  // Conditional rendering based on screen size
+  if (isMobile) {
+    return (
+      <>
+        <MobileUI />
+        {/* Keep modals accessible */}
+        <AuthModal />
+      </>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
