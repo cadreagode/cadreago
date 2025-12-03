@@ -131,6 +131,67 @@ const getPriceMarkerStyle = (active) => ({
   transform: active ? 'scale(1.1)' : 'scale(1)',
 });
 
+const DestinationSearchInput = ({
+  value,
+  onChange,
+  onFocus,
+  onBlur,
+  suggestions = [],
+  showSuggestions,
+  onSuggestionSelect,
+  loading,
+  inputRef,
+  className = ''
+}) => (
+  <div className="relative">
+    <MapPin className="absolute left-3 top-3 text-gray-400 pointer-events-none" size={18} />
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      onChange={onChange}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      placeholder={loading ? 'Detecting location...' : 'Where are you going?'}
+      autoComplete="off"
+      className={`w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 ${className}`}
+    />
+
+    {loading && (
+      <div className="absolute right-3 top-3 text-xs text-slate-400">
+        Detecting…
+      </div>
+    )}
+
+    {showSuggestions && suggestions.length > 0 && (
+      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+        {suggestions.map((suggestion) => (
+          <button
+            key={suggestion.place_id}
+            type="button"
+            onMouseDown={(e) => {
+              // Prevent losing focus before click handler runs
+              e.preventDefault();
+            }}
+            onClick={() => onSuggestionSelect(suggestion)}
+            className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors flex items-start space-x-3 border-b border-gray-100 last:border-b-0"
+          >
+            <MapPin size={18} className="text-gray-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-gray-900 truncate">
+                {suggestion.structured_formatting?.main_text || suggestion.description.split(',')[0]}
+              </div>
+              <div className="text-sm text-gray-500 truncate">
+                {suggestion.structured_formatting?.secondary_text || suggestion.description}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 const CadreagoApp = () => {
   const [currentView, setCurrentView] = useState('search');
   const [selectedHotel, setSelectedHotel] = useState(null);
@@ -236,6 +297,7 @@ const CadreagoApp = () => {
   }, []);
   const searchInputRef = useRef(null);
   const searchInputRefDesktop = useRef(null);
+  const destinationInputFocusedRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
@@ -814,6 +876,28 @@ const CadreagoApp = () => {
     setSearchQuery(destination);
   };
 
+  // Keep focus on destination input across re-mounts while typing
+  useEffect(() => {
+    if (!destinationInputFocusedRef.current) return;
+    if (isMobile) return;
+
+    const activeRef = currentView === 'search' ? searchInputRef : searchInputRefDesktop;
+    if (activeRef.current && document.activeElement !== activeRef.current) {
+      activeRef.current.focus();
+    }
+  }, [destinationInput, currentView, isMobile]);
+
+  // Ensure input keeps focus when suggestions appear
+  useEffect(() => {
+    if (!showSuggestions) return;
+    if (isMobile) return;
+
+    const activeRef = currentView === 'search' ? searchInputRef : searchInputRefDesktop;
+    if (activeRef.current && document.activeElement !== activeRef.current) {
+      activeRef.current.focus();
+    }
+  }, [showSuggestions, currentView, isMobile]);
+
   // Load all properties on initial mount
   useEffect(() => {
     const loadAllHotels = async () => {
@@ -1296,8 +1380,16 @@ const CadreagoApp = () => {
     fetchPlaceSuggestions(value);
   }, [fetchPlaceSuggestions]);
 
+  const handleDestinationInputFocus = React.useCallback(() => {
+    destinationInputFocusedRef.current = true;
+    if (suggestions.length > 0) {
+      setShowSuggestions(true);
+    }
+  }, [suggestions.length]);
+
   // NEW: Handle suggestions blur
   const handleSuggestionsBlur = React.useCallback(() => {
+    destinationInputFocusedRef.current = false;
     // Delay to allow click on suggestion
     setTimeout(() => {
       setShowSuggestions(false);
@@ -2159,56 +2251,6 @@ const CadreagoApp = () => {
     )
   );
 
-  // Destination input with Google Places suggestions
-  const DestinationSearchInput = ({ inputRef, className = "" }) => (
-    <div className="relative">
-      <MapPin className="absolute left-3 top-3 text-gray-400 pointer-events-none" size={18} />
-      <input
-        ref={inputRef}
-        type="text"
-        value={destinationInput}
-        onChange={handleDestinationInputChange}
-        onFocus={() => {
-          if (suggestions.length > 0) setShowSuggestions(true);
-        }}
-        onBlur={handleSuggestionsBlur}
-        placeholder={locationLoading ? "Detecting location..." : "Where are you going?"}
-        className={`w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 ${className}`}
-      />
-
-      {/* Place suggestions dropdown */}
-      {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-          {suggestions.map((suggestion) => (
-            <button
-              key={suggestion.place_id}
-              type="button"
-              onClick={() => handleSelectSuggestion(suggestion)}
-              className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors flex items-start space-x-3 border-b border-gray-100 last:border-b-0"
-            >
-              <MapPin size={18} className="text-gray-400 mt-0.5 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-900 truncate">
-                  {suggestion.structured_formatting?.main_text || suggestion.description.split(',')[0]}
-                </div>
-                <div className="text-sm text-gray-500 truncate">
-                  {suggestion.structured_formatting?.secondary_text || suggestion.description}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Loading indicator */}
-      {locationLoading && (
-        <div className="absolute right-3 top-3">
-          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-    </div>
-  );
-
   // Home Page
   const HomePage = () => (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
@@ -2224,7 +2266,17 @@ const CadreagoApp = () => {
               {/* Destination */}
               <div>
                 <label className="block text-left text-sm font-medium text-gray-700 mb-2">Destination</label>
-                <DestinationSearchInput inputRef={searchInputRefDesktop} />
+                <DestinationSearchInput
+                  inputRef={searchInputRefDesktop}
+                  value={destinationInput}
+                  onChange={handleDestinationInputChange}
+                  onFocus={handleDestinationInputFocus}
+                  onBlur={handleSuggestionsBlur}
+                  suggestions={suggestions}
+                  showSuggestions={showSuggestions}
+                  onSuggestionSelect={handleSelectSuggestion}
+                  loading={locationLoading}
+                />
               </div>
 
               {/* Check-in */}
@@ -2575,6 +2627,14 @@ const CadreagoApp = () => {
               <label className="block text-sm text-gray-600 mb-1">Destination</label>
               <DestinationSearchInput
                 inputRef={searchInputRef}
+                value={destinationInput}
+                onChange={handleDestinationInputChange}
+                onFocus={handleDestinationInputFocus}
+                onBlur={handleSuggestionsBlur}
+                suggestions={suggestions}
+                showSuggestions={showSuggestions}
+                onSuggestionSelect={handleSelectSuggestion}
+                loading={locationLoading}
                 className="text-sm md:text-base py-2.5 md:py-3"
               />
             </div>
