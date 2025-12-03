@@ -93,7 +93,7 @@ const transformPropertyData = (property) => {
     // Map database fields to component expectations
     image,
     images: galleryImages,
-    price: property.base_price_per_night || 0,
+    price: parseFloat(property.base_price_per_night) || 0,
     currency: property.currency || 'INR', // Get currency from database
     amenities,
     coordinates,

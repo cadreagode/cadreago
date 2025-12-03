@@ -5,10 +5,11 @@ import brandIcon from '../assets/logo_icon.png';
 import brandLogoDark from '../assets/logo_non-transperant.png';
 import { fetchHotels, fetchHotelsByHost } from '../services/hotelService';
 import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus } from '../services/bookingService';
-import { signIn, signUp, signOut, getCurrentUser } from '../services/authService';
+import { signIn, signUp, signOut, getCurrentUser, updateProfile, fetchProfileById, updateHostInfo } from '../services/authService';
 import { fetchUserPayments } from '../services/paymentService';
 import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
 import CadreagoMobileApp from './cadreagoHotelBookingMobileView';
+import GoogleMap from './GoogleMap';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
 const formatCurrency = (amount, currency = 'INR') => {
@@ -42,6 +43,67 @@ const addonIconMap = {
   CreditCard,
   Wifi
 };
+const ADDON_ICON_KEYS = Object.keys(addonIconMap);
+const DEFAULT_ADDON_ICON = ADDON_ICON_KEYS[0] || 'Coffee';
+const PUBLIC_ASSET_BASE = process.env.PUBLIC_URL || '';
+const getAssetUrl = (path = '') => `${PUBLIC_ASSET_BASE}${path}`;
+const INLINE_HEART_PIN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56" fill="none"><rect width="56" height="56" rx="28" fill="#7837FF"></rect><path d="M46.0675 22.1319L44.0601 22.7843" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M11.9402 33.2201L9.93262 33.8723" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M27.9999 47.0046V44.8933" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M27.9999 9V11.1113" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M39.1583 43.3597L37.9186 41.6532" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M16.8419 12.6442L18.0816 14.3506" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M9.93262 22.1319L11.9402 22.7843" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M46.0676 33.8724L44.0601 33.2201" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M39.1583 12.6442L37.9186 14.3506" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M16.8419 43.3597L18.0816 41.6532" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M28 39L26.8725 37.9904C24.9292 36.226 23.325 34.7026 22.06 33.4202C20.795 32.1378 19.7867 30.9918 19.035 29.9823C18.2833 28.9727 17.7562 28.0587 17.4537 27.2401C17.1512 26.4216 17 25.5939 17 24.7572C17 23.1201 17.5546 21.7513 18.6638 20.6508C19.7729 19.5502 21.1433 19 22.775 19C23.82 19 24.7871 19.2456 25.6762 19.7367C26.5654 20.2278 27.34 20.9372 28 21.8649C28.77 20.8827 29.5858 20.1596 30.4475 19.6958C31.3092 19.2319 32.235 19 33.225 19C34.8567 19 36.2271 19.5502 37.3362 20.6508C38.4454 21.7513 39 23.1201 39 24.7572C39 25.5939 38.8488 26.4216 38.5463 27.2401C38.2438 28.0587 37.7167 28.9727 36.965 29.9823C36.2133 30.9918 35.205 32.1378 33.94 33.4202C32.675 34.7026 31.0708 36.226 29.1275 37.9904L28 39Z" fill="#FF7878"></path></svg>';
+const SAMPLE_PLACE_ID = 'ChIJN5Nz71W3j4ARhx5bwpTQEGg';
+const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
+
+const initialHostProperties = [
+  {
+    id: 1,
+    name: 'Bella Vista Resort',
+    location: 'Miami, Florida',
+    stars: 3,
+    type: 'Resort',
+    rooms: 45,
+    status: 'active',
+    rating: 7.5,
+    reviews: 174,
+    basePrice: 56,
+    image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=400&h=300&fit=crop',
+    amenities: ['Pool', 'Spa', 'Parking', 'WiFi'],
+    totalBookings: 234,
+    monthlyRevenue: 12500,
+    occupancyRate: 78
+  },
+  {
+    id: 2,
+    name: 'Sunset Beach Villa',
+    location: 'Ibiza, Spain',
+    stars: 5,
+    type: 'Villa',
+    rooms: 12,
+    status: 'active',
+    rating: 9.2,
+    reviews: 89,
+    basePrice: 280,
+    image: 'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=400&h=300&fit=crop',
+    amenities: ['Pool', 'Beach Access', 'WiFi', 'Kitchen'],
+    totalBookings: 156,
+    monthlyRevenue: 35400,
+    occupancyRate: 92
+  },
+  {
+    id: 3,
+    name: 'Mountain View Lodge',
+    location: 'Aspen, Colorado',
+    stars: 4,
+    type: 'Lodge',
+    rooms: 28,
+    status: 'pending',
+    rating: 8.8,
+    reviews: 45,
+    basePrice: 150,
+    image: 'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=300&fit=crop',
+    amenities: ['Ski Access', 'Fireplace', 'Parking', 'Restaurant'],
+    totalBookings: 67,
+    monthlyRevenue: 8900,
+    occupancyRate: 65
+  }
+];
 
 const PRICE_MARKER_BASE_STYLE = {
   display: 'inline-flex',
@@ -51,24 +113,22 @@ const PRICE_MARKER_BASE_STYLE = {
   borderRadius: '999px',
   fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontWeight: '700',
-  fontSize: '15px',
-  boxShadow: '0 4px 12px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12)',
+  fontSize: '14px',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
   cursor: 'pointer',
-  transition: 'transform 0.2s ease, background 0.2s ease, border 0.2s ease',
+  transition: 'all 0.2s ease',
   whiteSpace: 'nowrap',
-  lineHeight: '1.2',
-  letterSpacing: '-0.01em',
-  position: 'relative',
-  transform: 'translate(-50%, -100%)',
-  transformOrigin: 'center bottom',
+  lineHeight: '1',
+  minWidth: '60px',
+  textAlign: 'center',
 };
 
 const getPriceMarkerStyle = (active) => ({
   ...PRICE_MARKER_BASE_STYLE,
   backgroundColor: active ? '#2563eb' : '#ffffff',
   border: `2px solid ${active ? '#1d4ed8' : '#e5e7eb'}`,
-  color: active ? '#ffffff' : '#0f172a',
-  transform: `${PRICE_MARKER_BASE_STYLE.transform} scale(${active ? 1.03 : 1})`,
+  color: active ? '#ffffff' : '#111827',
+  transform: active ? 'scale(1.1)' : 'scale(1)',
 });
 
 const CadreagoApp = () => {
@@ -79,7 +139,6 @@ const CadreagoApp = () => {
   const [showBanner, setShowBanner] = useState(true);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const [showGuestSelector, setShowGuestSelector] = useState(false);
-  const [showDestinations, setShowDestinations] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -96,21 +155,87 @@ const CadreagoApp = () => {
   const [showMessageHostModal, setShowMessageHostModal] = useState(false);
   const hostMessageRef = useRef(null);
   const [preferredUserType, setPreferredUserType] = useState('guest');
-  const [hostOnboardingCompleted, setHostOnboardingCompleted] = useState(true);
+  const [hostOnboardingCompleted, setHostOnboardingCompleted] = useState(false);
+  const [aadhaar, setAadhaar] = useState({ number: '', status: 'pending' });
+  const [gstRegistered, setGstRegistered] = useState(false);
+  const [gst, setGst] = useState({ number: '', status: 'pending' });
+  const [bank, setBank] = useState({ account: '', ifsc: '', status: 'pending' });
+  const [hostProperties, setHostProperties] = useState(initialHostProperties);
+  const togglePropertyStatus = (propertyId) => {
+    setHostProperties((prev) =>
+      prev.map((property) =>
+        property.id === propertyId
+          ? { ...property, status: property.status === 'active' ? 'inactive' : 'active' }
+          : property
+      )
+    );
+  };
   const [showAddAddonModal, setShowAddAddonModal] = useState(false);
-  const [addonForm, setAddonForm] = useState({ propertyId: '', name: '', description: '', price: '' });
+  const [addonForm, setAddonForm] = useState({
+    propertyId: initialHostProperties[0]?.id || '',
+    name: '',
+    description: '',
+    price: '',
+    icon: DEFAULT_ADDON_ICON
+  });
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [payoutForm, setPayoutForm] = useState({ amount: '', notes: '' });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [mapSelectedHotel, setMapSelectedHotel] = useState(null);
+  const [hoveredHotelId, setHoveredHotelId] = useState(null);
+  const [zoomToHotelId, setZoomToHotelId] = useState(null);
   const [mapZoom, setMapZoom] = useState(6);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState('');
+  const [mapUserInteracted, setMapUserInteracted] = useState(false);
+  const [stableMapCenter, setStableMapCenter] = useState(DEFAULT_MAP_CENTER);
   const mapInstanceRef = useRef(null);
+  const googleMapRef = useRef(null); // Ref for new GoogleMap component
+  const userInteractedWithMap = useRef(false); // Track if user manually moved/zoomed map
+  const mapLoadedRef = useRef(false);
+
+  const handleHotelMarkerClick = React.useCallback((hotel) => {
+    if (!hotel) return;
+    console.log('Hotel marker clicked:', hotel.name);
+    setMapSelectedHotel(hotel);
+    setSelectedHotel(hotel);
+  }, []);
+
+  const handleHotelMarkerHover = React.useCallback((hotelId) => {
+    setHoveredHotelId(hotelId);
+  }, []);
+
+  const handleMapReady = React.useCallback((map) => {
+    console.log('✓ GoogleMap component ready!');
+    mapInstanceRef.current = map;
+
+    // REMOVED: clearSavedView call (view persistence feature disabled in GoogleMap.jsx)
+    // Map now always uses props center/zoom, allowing auto-fit to work correctly
+
+    const markUserInteraction = () => {
+      userInteractedWithMap.current = true;
+      setMapUserInteracted(true);
+    };
+
+    map.addListener('click', () => {
+      setMapSelectedHotel(null);
+      setHoveredHotelId(null);
+    });
+
+    // Track user interactions with map (drag, zoom)
+    map.addListener('dragstart', markUserInteraction);
+    map.addListener('zoom_changed', () => {
+      if (mapLoadedRef.current) {
+        markUserInteraction();
+      }
+    });
+
+    setMapLoaded(true);
+    mapLoadedRef.current = true;
+    setMapError('');
+  }, []);
   const searchInputRef = useRef(null);
   const searchInputRefDesktop = useRef(null);
-  const autocompleteRef = useRef(null);
-  const autocompleteRefDesktop = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
@@ -131,17 +256,49 @@ const CadreagoApp = () => {
   const [locationLoading, setLocationLoading] = useState(false);
   const [mapBounds, setMapBounds] = useState(null);
   const [showMapViewHotels, setShowMapViewHotels] = useState(false);
+  const [mapDirty, setMapDirty] = useState(false);
+  const [notification, setNotification] = useState(null);
 
-  const popularDestinations = [
-    'Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata',
-    'Hyderabad', 'Pune', 'Ahmedabad', 'Jaipur', 'Goa',
-    'Kerala', 'Udaipur', 'Agra', 'Varanasi', 'Rishikesh',
-    'Darjeeling', 'Shimla', 'Manali', 'Ooty', 'Coorg'
-  ];
+  // NEW: Improved search state
+  const [destinationInput, setDestinationInput] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [placesLoaded, setPlacesLoaded] = useState(false);
+  
+  // NEW: Refs for Places API services
+  const autocompleteServiceRef = useRef(null);
+  const placesServiceRef = useRef(null);
+  const searchDebounceRef = useRef(null);
+  const initialLocationFetched = useRef(false);
 
-  const filteredDestinations = popularDestinations.filter(dest =>
-    dest.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Ref to store current map bounds without triggering re-renders
+  const mapBoundsRef = useRef(null);
+  const boundsUpdateTimeoutRef = useRef(null);
+
+  const showNotification = (type, message) => {
+    setNotification({ type, message });
+    setTimeout(() => {
+      setNotification(null);
+    }, 5000);
+  };
+
+  const handleBoundsChanged = React.useCallback((bounds) => {
+    // Store bounds in ref immediately without triggering re-render
+    mapBoundsRef.current = bounds;
+
+    // Debounce the state update to prevent infinite loop
+    if (boundsUpdateTimeoutRef.current) {
+      clearTimeout(boundsUpdateTimeoutRef.current);
+    }
+
+    boundsUpdateTimeoutRef.current = setTimeout(() => {
+      setMapBounds(bounds);
+      // Only show "Search this area" when a destination is set
+      if (searchParams.destination && searchParams.destination.trim() !== '') {
+        setMapDirty(true);
+      }
+    }, 300); // 300ms debounce
+  }, [searchParams.destination]);
 
   // Use Supabase data for user bookings (loaded in loadUserData function)
   const userBookings = userBookingsData;
@@ -218,61 +375,6 @@ const CadreagoApp = () => {
       price: 35,
       icon: '🥂',
       perPerson: false
-    }
-  ];
-
-  // Mock host properties
-  const hostProperties = [
-    {
-      id: 1,
-      name: 'Bella Vista Resort',
-      location: 'Miami, Florida',
-      stars: 3,
-      type: 'Resort',
-      rooms: 45,
-      status: 'active',
-      rating: 7.5,
-      reviews: 174,
-      basePrice: 56,
-      image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=400&h=300&fit=crop',
-      amenities: ['Pool', 'Spa', 'Parking', 'WiFi'],
-      totalBookings: 234,
-      monthlyRevenue: 12500,
-      occupancyRate: 78
-    },
-    {
-      id: 2,
-      name: 'Sunset Beach Villa',
-      location: 'Ibiza, Spain',
-      stars: 5,
-      type: 'Villa',
-      rooms: 12,
-      status: 'active',
-      rating: 9.2,
-      reviews: 89,
-      basePrice: 280,
-      image: 'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=400&h=300&fit=crop',
-      amenities: ['Pool', 'Beach Access', 'WiFi', 'Kitchen'],
-      totalBookings: 156,
-      monthlyRevenue: 35400,
-      occupancyRate: 92
-    },
-    {
-      id: 3,
-      name: 'Mountain View Lodge',
-      location: 'Aspen, Colorado',
-      stars: 4,
-      type: 'Lodge',
-      rooms: 28,
-      status: 'pending',
-      rating: 8.8,
-      reviews: 45,
-      basePrice: 150,
-      image: 'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=300&fit=crop',
-      amenities: ['Ski Access', 'Fireplace', 'Parking', 'Restaurant'],
-      totalBookings: 67,
-      monthlyRevenue: 8900,
-      occupancyRate: 65
     }
   ];
 
@@ -380,6 +482,15 @@ const CadreagoApp = () => {
     }
   }, [showMessageHostModal]);
 
+  // Cleanup bounds update timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (boundsUpdateTimeoutRef.current) {
+        clearTimeout(boundsUpdateTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Helper functions
   const incrementGuests = (type) => {
     setSearchParams(prev => ({
@@ -466,6 +577,64 @@ const CadreagoApp = () => {
     }
   };
 
+  // Initialize host-related state from Supabase profile + host_info
+  const initializeHostFromProfile = (profile) => {
+    if (!profile) return false;
+
+    // Prefer user_role from profile if present
+    if (profile.user_role === 'host') {
+      setUserType('host');
+    }
+
+    const rawHostInfo = profile.host_info;
+    const hostInfo = Array.isArray(rawHostInfo) ? rawHostInfo[0] : rawHostInfo;
+    if (!hostInfo) return false;
+
+    const aadhaarStatus = hostInfo.aadhaar_status || (hostInfo.verified ? 'verified' : 'pending');
+    const gstRegisteredValue = !!hostInfo.gst_registered;
+    const gstStatus = hostInfo.gst_status || 'pending';
+    const bankStatus = hostInfo.bank_status || (hostInfo.verified ? 'verified' : 'pending');
+
+    // Hydrate global KYC state from existing host_info so
+    // onboarding/profile screens are pre-filled from the database.
+    setAadhaar({
+      number: hostInfo.aadhaar_number || '',
+      status: aadhaarStatus
+    });
+    setGstRegistered(gstRegisteredValue);
+    setGst({
+      number: hostInfo.gst_number || '',
+      status: gstRegisteredValue ? gstStatus : 'pending'
+    });
+    setBank({
+      account: hostInfo.bank_account_number || '',
+      ifsc: hostInfo.bank_ifsc || '',
+      status: bankStatus
+    });
+
+    const onboardingCompleted = !!hostInfo.onboarding_completed || hostInfo.verified === true;
+    setHostOnboardingCompleted(onboardingCompleted);
+
+    return onboardingCompleted;
+  };
+
+  const ensureHostInfoRecord = async (userId, profile) => {
+    if (!userId || !profile) return;
+    const rawHostInfo = profile.host_info;
+    const hasHostInfo = Array.isArray(rawHostInfo) ? rawHostInfo.length > 0 : !!rawHostInfo;
+    if (hasHostInfo) return;
+
+    try {
+      await updateHostInfo(userId, {
+        onboarding_completed: false,
+        verified: false,
+        member_since: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Error ensuring host_info record:', err);
+    }
+  };
+
   // Load user-specific data after login
   const loadUserData = async (userId) => {
     // Load bookings
@@ -490,7 +659,12 @@ const CadreagoApp = () => {
     }
 
     if (data?.user) {
-      const userName = data.user.user_metadata?.full_name || data.user.email.split('@')[0];
+      // Prefer profile.full_name, then auth metadata, then email prefix
+      const profileName = data.profile?.full_name;
+      const metaName = data.user.user_metadata?.full_name;
+      const fallbackName = data.user.email.split('@')[0];
+      const userName = profileName || metaName || fallbackName;
+
       setUser({
         id: data.user.id,
         name: userName,
@@ -498,10 +672,33 @@ const CadreagoApp = () => {
         avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
       });
       setIsLoggedIn(true);
-      setUserType(type);
+
+      // Resolve user type based on profile role if available
+      const profileRole = data.profile?.user_role;
+      const resolvedType = profileRole === 'host' ? 'host' : type;
+      setUserType(resolvedType);
+
+      // Load full profile with host_info so host onboarding state can be restored
+      let profileForHost = data.profile;
+      if (!profileForHost || !profileForHost.host_info) {
+        const { data: fullProfile } = await fetchProfileById(data.user.id);
+        if (fullProfile) {
+          profileForHost = fullProfile;
+        }
+      }
+
+      if (resolvedType === 'host' && profileForHost) {
+        await ensureHostInfoRecord(data.user.id, profileForHost);
+      }
+
+      let onboardingCompleted = hostOnboardingCompleted;
+      if (profileForHost) {
+        onboardingCompleted = initializeHostFromProfile(profileForHost);
+      }
+
       setShowAuthModal(false);
-      const destination = type === 'host'
-        ? (hostOnboardingCompleted ? 'host-dashboard' : 'host-onboarding')
+      const destination = resolvedType === 'host'
+        ? (onboardingCompleted ? 'host-dashboard' : 'host-onboarding')
         : 'dashboard';
       setCurrentView(destination);
 
@@ -511,7 +708,7 @@ const CadreagoApp = () => {
   };
 
   const handleSignup = async (name, email, password, type = 'guest') => {
-    const { data, error } = await signUp(email, password, { full_name: name, user_type: type });
+    const { data, error } = await signUp(email, password, { full_name: name, user_role: type });
     if (error) {
       alert('Signup failed: ' + error);
       return;
@@ -528,6 +725,16 @@ const CadreagoApp = () => {
       setUserType(type);
       setShowAuthModal(false);
       if (type === 'host') {
+        try {
+          await updateHostInfo(data.user.id, {
+            onboarding_completed: false,
+            verified: false,
+            member_since: new Date().toISOString()
+          });
+        } catch (err) {
+          console.error('Error creating initial host_info for new host:', err);
+          showNotification('error', 'Host account was created, but we could not save initial host details. You can try again from the onboarding form.');
+        }
         setHostOnboardingCompleted(false);
         setCurrentView('host-onboarding');
       } else {
@@ -558,7 +765,11 @@ const CadreagoApp = () => {
     const checkSession = async () => {
       const { data } = await getCurrentUser();
       if (data?.user) {
-        const userName = data.user.user_metadata?.full_name || data.user.email.split('@')[0];
+        const profileName = data.profile?.full_name;
+        const metaName = data.user.user_metadata?.full_name;
+        const fallbackName = data.user.email.split('@')[0];
+        const userName = profileName || metaName || fallbackName;
+
         setUser({
           id: data.user.id,
           name: userName,
@@ -566,7 +777,19 @@ const CadreagoApp = () => {
           avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
         });
         setIsLoggedIn(true);
-        setUserType(data.user.user_metadata?.user_type || 'guest');
+
+        // Prefer profile.user_role over metadata
+        const profileRole = data.profile?.user_role;
+        if (profileRole === 'host') {
+          setUserType('host');
+          await ensureHostInfoRecord(data.user.id, data.profile);
+        } else {
+          setUserType('guest');
+        }
+
+        if (data.profile) {
+          initializeHostFromProfile(data.profile);
+        }
 
         // Load user data
         await loadUserData(data.user.id);
@@ -601,7 +824,14 @@ const CadreagoApp = () => {
       const { data, error } = await fetchHotels({});
       if (!error && data) {
         setHotels(data);
-        console.log(`Loaded ${data.length} properties total`, data);
+        console.log(`Loaded ${data.length} properties total`);
+
+        // Sanity check: log coordinates of all properties
+        console.log('Property coordinates:', data.map(h => ({
+          id: h.id,
+          name: h.name,
+          coords: h.coordinates || { lat: h.latitude, lng: h.longitude }
+        })));
       } else {
         console.error('Error loading properties:', error);
         setHotels([]);
@@ -859,15 +1089,45 @@ const CadreagoApp = () => {
 
   // Combined hotels list: show search results, or map view if no results
   const displayedHotels = React.useMemo(() => {
+    const hasDestination =
+      !!searchParams.destination && searchParams.destination.trim() !== '';
+
+    // 🗺 Map-driven mode: no destination typed → show hotels in current map view
+    if (!hasDestination) {
+      if (mapBounds && hotels.some(h => h.coordinates)) {
+        // If we have bounds and properties with coordinates,
+        // prefer only hotels inside the visible area
+        const inBounds = hotels.filter(h =>
+          h.coordinates &&
+          isWithinBounds(h.coordinates.lat, h.coordinates.lng, mapBounds)
+        );
+        return inBounds.length > 0 ? inBounds : hotels;
+      }
+      // No bounds yet → show all
+      return hotels;
+    }
+
+    // 🔍 Destination-based mode: use the full filtered logic first
     if (filteredHotels.length > 0) {
       return filteredHotels;
     }
-    // If no search results, show hotels in current map view
+
+    // Destination given but zero results:
+    // allow a manual "Show properties in current map view" fallback
     if (mapViewHotels.length > 0 && showMapViewHotels) {
       return mapViewHotels;
     }
-    return filteredHotels; // Empty array
-  }, [filteredHotels, mapViewHotels, showMapViewHotels]);
+
+    // Truly nothing found
+    return [];
+  }, [
+    hotels,
+    filteredHotels,
+    mapBounds,
+    mapViewHotels,
+    showMapViewHotels,
+    searchParams.destination,
+  ]);
 
   // Reset showMapViewHotels when we have filtered results
   useEffect(() => {
@@ -876,47 +1136,225 @@ const CadreagoApp = () => {
     }
   }, [filteredHotels.length, showMapViewHotels]);
 
-  // Update map center and zoom when filtered hotels change
-  useEffect(() => {
-    if (!mapInstanceRef.current || !displayedHotels.length || !window.google?.maps) return;
+  const fitMapToHotels = React.useCallback((hotelsToFit) => {
+    if (!googleMapRef.current || !hotelsToFit?.length || !window.google?.maps) return;
 
-    const map = mapInstanceRef.current;
-    const hotelsWithCoords = displayedHotels.filter(h => h.coordinates);
-    if (hotelsWithCoords.length === 0) return;
-
-    // If there's a selected place, center on it
-    if (selectedPlace && selectedPlace.geometry) {
-      const center = {
-        lat: selectedPlace.geometry.location.lat(),
-        lng: selectedPlace.geometry.location.lng()
-      };
-      map.setCenter(center);
-
-      // Adjust zoom based on number of properties
-      if (hotelsWithCoords.length === 1) {
-        map.setZoom(12);
-        setMapZoom(12);
-      } else if (hotelsWithCoords.length <= 3) {
-        map.setZoom(9);
-        setMapZoom(9);
-      } else {
-        map.setZoom(7);
-        setMapZoom(7);
-      }
+    // Don't auto-fit if user has manually moved/zoomed the map
+    if (userInteractedWithMap.current) {
+      console.log('Skipping auto-fit: user has interacted with map');
       return;
     }
 
-    // Otherwise, fit bounds to show all displayed hotels
     const bounds = new window.google.maps.LatLngBounds();
-    hotelsWithCoords.forEach(hotel => {
-      bounds.extend({
-        lat: hotel.coordinates.lat,
-        lng: hotel.coordinates.lng
-      });
+    let hasValidCoordinates = false;
+
+    hotelsToFit.forEach(hotel => {
+      const lat = Number(hotel.latitude || hotel.coordinates?.lat);
+      const lng = Number(hotel.longitude || hotel.coordinates?.lng);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        bounds.extend({ lat, lng });
+        hasValidCoordinates = true;
+      }
     });
 
-    map.fitBounds(bounds, 50); // 50px padding
-  }, [displayedHotels, selectedPlace]);
+    if (hasValidCoordinates) {
+      console.log(`Auto-fitting map to ${hotelsToFit.length} hotels`);
+      googleMapRef.current.fitBounds(bounds, { padding: 50 });
+    }
+  }, []);
+
+  // Auto-fit map to displayed hotels when they change and user hasn't moved the map
+  useEffect(() => {
+    if (!mapLoadedRef.current) {
+      console.log('Skipping auto-fit: map not ready yet');
+      return;
+    }
+    if (!displayedHotels || displayedHotels.length === 0) {
+      console.log('Skipping auto-fit: no hotels to display');
+      return;
+    }
+
+    // Only if at least one hotel has valid coordinates
+    const hasCoords = displayedHotels.some(h =>
+      (h.coordinates && !isNaN(Number(h.coordinates.lat)) && !isNaN(Number(h.coordinates.lng))) ||
+      (!isNaN(Number(h.latitude)) && !isNaN(Number(h.longitude)))
+    );
+    if (!hasCoords) {
+      console.log('Skipping auto-fit: no hotels with valid coordinates');
+      return;
+    }
+
+    console.log(`Auto-fitting map to ${displayedHotels.length} displayed hotels`);
+    fitMapToHotels(displayedHotels);
+  }, [displayedHotels, fitMapToHotels]);
+
+  // Reset map to show all displayed hotels and clear interaction state
+  const resetMapView = React.useCallback(() => {
+    userInteractedWithMap.current = false;
+    setMapUserInteracted(false);
+    setMapSelectedHotel(null);
+    setHoveredHotelId(null);
+
+    if (googleMapRef.current && displayedHotels.length > 0 && window.google?.maps) {
+      const bounds = new window.google.maps.LatLngBounds();
+      let hasValidCoordinates = false;
+
+      displayedHotels.forEach(hotel => {
+        const lat = Number(hotel.latitude || hotel.coordinates?.lat);
+        const lng = Number(hotel.longitude || hotel.coordinates?.lng);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          bounds.extend({ lat, lng });
+          hasValidCoordinates = true;
+        }
+      });
+
+      if (hasValidCoordinates) {
+        googleMapRef.current.fitBounds(bounds, { padding: 50 });
+      }
+    }
+  }, [displayedHotels]);
+
+  // NEW: Fetch place suggestions from Google Places API
+  const fetchPlaceSuggestions = React.useCallback((input) => {
+    if (!autocompleteServiceRef.current || !input || input.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    // Clear previous debounce
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    searchDebounceRef.current = setTimeout(() => {
+      autocompleteServiceRef.current.getPlacePredictions(
+        {
+          input,
+          types: ['(cities)'],
+          componentRestrictions: { country: 'in' } // Remove for worldwide search
+        },
+        (predictions, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
+            setSuggestions(predictions);
+            setShowSuggestions(true);
+          } else {
+            setSuggestions([]);
+          }
+        }
+      );
+    }, 300); // Debounce 300ms
+  }, []);
+
+  // NEW: Handle selecting a suggestion
+  const handleSelectSuggestion = React.useCallback((suggestion) => {
+    if (!placesServiceRef.current || !suggestion?.place_id) return;
+
+    placesServiceRef.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['name', 'geometry', 'formatted_address', 'address_components']
+      },
+      (place, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
+          const cityName = place.name || suggestion.description;
+
+          setDestinationInput(cityName);
+          setSearchQuery(cityName);
+          setSearchParams(prev => ({ ...prev, destination: cityName }));
+          setSelectedPlace(place);
+          setSuggestions([]);
+          setShowSuggestions(false);
+
+          // Update input refs
+          if (searchInputRef.current) searchInputRef.current.value = cityName;
+          if (searchInputRefDesktop.current) searchInputRefDesktop.current.value = cityName;
+
+          // Mark as user search and reset map interaction
+          selectedPlaceSourceRef.current = 'user-search';
+          userInteractedWithMap.current = false;
+          setMapUserInteracted(false);
+
+          // Clear saved view so map can auto-fit to new destination's hotels
+          if (googleMapRef.current?.clearSavedView) {
+            console.log('Clearing saved map view for new destination');
+            googleMapRef.current.clearSavedView();
+          }
+
+          console.log('Selected place:', cityName);
+        }
+      }
+    );
+  }, []);
+
+  // NEW: Handle destination input change
+  const handleDestinationInputChange = React.useCallback((e) => {
+    const value = e.target.value;
+    setDestinationInput(value);
+    setSearchQuery(value);
+    fetchPlaceSuggestions(value);
+  }, [fetchPlaceSuggestions]);
+
+  // NEW: Handle suggestions blur
+  const handleSuggestionsBlur = React.useCallback(() => {
+    // Delay to allow click on suggestion
+    setTimeout(() => {
+      setShowSuggestions(false);
+    }, 200);
+  }, []);
+
+  // Track if selectedPlace was set by user search vs automatic geolocation
+  const selectedPlaceSourceRef = useRef('');
+
+  useEffect(() => {
+    if (!selectedPlace?.geometry) return;
+
+    // Only center map if user hasn't interacted with it AND this is from user search
+    if (!userInteractedWithMap.current && selectedPlaceSourceRef.current === 'user-search') {
+      const newCenter = {
+        lat: selectedPlace.geometry.location.lat(),
+        lng: selectedPlace.geometry.location.lng()
+      };
+
+      if (googleMapRef.current) {
+        googleMapRef.current.setCenter(newCenter);
+        googleMapRef.current.setZoom(10);
+        console.log('Map centered to user-selected place');
+      }
+    } else if (selectedPlaceSourceRef.current === 'geolocation') {
+      console.log('Skipping map center for geolocation');
+    }
+  }, [selectedPlace]);
+
+  // Dynamically load the Google Maps script
+  useEffect(() => {
+    const scriptId = 'google-maps-script';
+
+    // Prevent script from being added multiple times
+    if (document.getElementById(scriptId)) {
+      console.log('Google Maps script already loaded.');
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = scriptId;
+    // Standard Maps JavaScript API (no v=beta needed)
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_MAPS_KEY}&libraries=marker,places&loading=async`;
+    script.async = true;
+    script.defer = true;
+
+    script.onload = () => {
+      console.log('Google Maps script loaded successfully.');
+    };
+
+    script.onerror = () => {
+      console.error('Error loading Google Maps script.');
+      setMapError('The map could not be loaded. Please check the API key and network connection.');
+    };
+
+    document.body.appendChild(script);
+  }, []);
 
   // Update map bounds when map is moved or zoomed
   useEffect(() => {
@@ -951,8 +1389,11 @@ const CadreagoApp = () => {
     };
   }, [mapLoaded]);
 
-  // Get user's current location on mount
+  // Get user's current location ONLY on first mount
   useEffect(() => {
+    // Skip if already fetched
+    if (initialLocationFetched.current) return;
+
     const getCurrentLocation = async () => {
       if (!navigator.geolocation) {
         console.log('Geolocation not supported');
@@ -960,31 +1401,54 @@ const CadreagoApp = () => {
       }
 
       setLocationLoading(true);
+
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           const { latitude, longitude } = position.coords;
           setCurrentLocation({ lat: latitude, lng: longitude });
+          initialLocationFetched.current = true;
 
-          // Reverse geocode to get city name
-          if (window.google?.maps?.importLibrary) {
-            try {
-              const { Geocoder } = await window.google.maps.importLibrary("geocoding");
-              const geocoder = new Geocoder();
-              const result = await geocoder.geocode({
-                location: { lat: latitude, lng: longitude }
-              });
+          // Wait for Google Maps to load
+          if (!window.google?.maps?.importLibrary) {
+            setLocationLoading(false);
+            return;
+          }
 
-              if (result.results[0]) {
-                // Find city from address components
-                const addressComponents = result.results[0].address_components;
-                const city = addressComponents.find(c =>
-                  c.types.includes('locality') || c.types.includes('administrative_area_level_2')
-                );
+          try {
+            const { Geocoder } = await window.google.maps.importLibrary("geocoding");
+            const geocoder = new Geocoder();
+            const result = await geocoder.geocode({
+              location: { lat: latitude, lng: longitude }
+            });
 
-                if (city) {
-                  const cityName = city.long_name;
+            if (result.results[0]) {
+              const addressComponents = result.results[0].address_components;
+              const city = addressComponents.find(c =>
+                c.types.includes('locality') || c.types.includes('administrative_area_level_2')
+              );
+
+              if (city) {
+                const cityName = city.long_name;
+
+                // Only set if user hasn't typed anything yet
+                if (!destinationInput && !searchQuery) {
+                  setDestinationInput(cityName);
                   setSearchQuery(cityName);
                   setSearchParams(prev => ({ ...prev, destination: cityName }));
+
+                  // Update input refs
+                  if (searchInputRef.current) searchInputRef.current.value = cityName;
+                  if (searchInputRefDesktop.current) searchInputRefDesktop.current.value = cityName;
+
+                  // Mark as geolocation source
+                  selectedPlaceSourceRef.current = 'geolocation';
+
+                  // Clear saved view so map can auto-fit to current location's hotels
+                  if (googleMapRef.current?.clearSavedView) {
+                    console.log('Clearing saved map view for current location');
+                    googleMapRef.current.clearSavedView();
+                  }
+
                   setSelectedPlace({
                     name: cityName,
                     geometry: {
@@ -994,131 +1458,63 @@ const CadreagoApp = () => {
                       }
                     },
                     formatted_address: result.results[0].formatted_address,
-                    address_components: addressComponents // Include address components!
+                    address_components: addressComponents
                   });
                 }
               }
-            } catch (error) {
-              console.log('Geocoding failed:', error.message);
             }
+          } catch (error) {
+            console.log('Geocoding failed:', error.message);
           }
+
           setLocationLoading(false);
         },
         (error) => {
           console.log('Location access denied or failed:', error.message);
           setLocationLoading(false);
+          initialLocationFetched.current = true;
         },
         { timeout: 10000, enableHighAccuracy: true }
       );
     };
 
-    // Only get location once on mount
     getCurrentLocation();
-  }, []);
+  }, []); // Empty deps - only run once
 
-  // Initialize Google Places Autocomplete with new async loading
+  // Initialize Google Places Services (NOT Autocomplete widget)
   useEffect(() => {
-    const initAutocomplete = async () => {
+    const initPlacesServices = async () => {
       try {
-        // Use the new importLibrary API for proper async loading
-        const { Autocomplete } = await window.google.maps.importLibrary("places");
+        if (!window.google?.maps?.importLibrary) return;
 
-        const autocompleteOptions = {
-          types: ['(cities)'],
-          fields: ['name', 'geometry', 'formatted_address', 'address_components'],
-          componentRestrictions: { country: 'in' }
-        };
+        const { AutocompleteService, PlacesService } = await window.google.maps.importLibrary("places");
 
-        // Initialize mobile autocomplete
-        if (searchInputRef.current && !autocompleteRef.current) {
-          // Set initial value before Autocomplete takes over
-          searchInputRef.current.value = searchQuery;
+        // PlacesService requires a div element (can be hidden)
+        const dummyDiv = document.createElement('div');
 
-          const mobileAc = new Autocomplete(searchInputRef.current, autocompleteOptions);
-          autocompleteRef.current = mobileAc;
+        autocompleteServiceRef.current = new AutocompleteService();
+        placesServiceRef.current = new PlacesService(dummyDiv);
 
-          mobileAc.addListener('place_changed', () => {
-            const place = mobileAc.getPlace();
-            console.log('Mobile autocomplete place selected:', place);
-            if (place.geometry) {
-              const cityName = place.name || place.formatted_address;
-              setSearchQuery(cityName);
-              setSearchParams(prev => ({...prev, destination: cityName}));
-              setSelectedPlace(place);
-              setShowDestinations(false);
-            }
-          });
-        }
-
-        // Initialize desktop autocomplete
-        if (searchInputRefDesktop.current && !autocompleteRefDesktop.current) {
-          // Set initial value before Autocomplete takes over
-          searchInputRefDesktop.current.value = searchQuery;
-
-          const desktopAc = new Autocomplete(searchInputRefDesktop.current, autocompleteOptions);
-          autocompleteRefDesktop.current = desktopAc;
-
-          desktopAc.addListener('place_changed', () => {
-            const place = desktopAc.getPlace();
-            console.log('Desktop autocomplete place selected:', place);
-            if (place.geometry) {
-              const cityName = place.name || place.formatted_address;
-              setSearchQuery(cityName);
-              setSearchParams(prev => ({...prev, destination: cityName}));
-              setSelectedPlace(place);
-              setShowDestinations(false);
-            }
-          });
-        }
+        setPlacesLoaded(true);
+        console.log('✓ Google Places services initialized');
       } catch (error) {
-        // Handle autocomplete errors (e.g., API key issues)
-        console.debug('Places Autocomplete not available:', error.message);
+        console.debug('Places services not available:', error.message);
       }
     };
 
-    // Initialize when Google Maps is available
     if (window.google?.maps?.importLibrary) {
-      initAutocomplete();
+      initPlacesServices();
     } else {
-      // Wait for Google Maps to load
       const checkGoogle = setInterval(() => {
         if (window.google?.maps?.importLibrary) {
-          initAutocomplete();
+          initPlacesServices();
           clearInterval(checkGoogle);
         }
       }, 100);
 
       return () => clearInterval(checkGoogle);
     }
-  }, []);
-
-  const initialMapCenter = React.useMemo(() => {
-    // Use selected place location if available
-    if (selectedPlace && selectedPlace.geometry) {
-      return {
-        lat: selectedPlace.geometry.location.lat(),
-        lng: selectedPlace.geometry.location.lng()
-      };
-    }
-    // Otherwise use first hotel with coordinates
-    const withCoordinates = displayedHotels.find(hotel => hotel.coordinates);
-    return withCoordinates?.coordinates || { lat: 20.5937, lng: 78.9629 };
-  }, [selectedPlace, displayedHotels]);
-
-  const handleMapReady = (event) => {
-    const detail = event?.detail || {};
-    const googleMap = detail.value || detail.map;
-    if (!googleMap) return;
-    if (mapInstanceRef.current === googleMap) {
-      return;
-    }
-    mapInstanceRef.current = googleMap;
-    googleMap.addListener('click', () => {
-      setMapSelectedHotel(null);
-    });
-    setMapLoaded(true);
-    setMapError('');
-  };
+  }, []); // Empty deps - only run once
 
   const toggleFavorite = async (hotelId) => {
     if (!isLoggedIn || !user?.id) {
@@ -1153,14 +1549,21 @@ const CadreagoApp = () => {
     return 'bg-orange-500';
   };
 
-  const getRatingBarWidth = (score) => `${(score / 10) * 100}%`;
+  const statusBadge = (status) => (
+    <span
+      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+        status === 'verified'
+          ? 'bg-green-100 text-green-700'
+          : status === 'pending'
+          ? 'bg-yellow-100 text-yellow-700'
+          : 'bg-gray-100 text-gray-700'
+      }`}
+    >
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  );
 
-  // Update map center when initialMapCenter changes (without reinitializing the map)
-  useEffect(() => {
-    if (mapInstanceRef.current && initialMapCenter) {
-      mapInstanceRef.current.setCenter(initialMapCenter);
-    }
-  }, [initialMapCenter]);
+  const getRatingBarWidth = (score) => `${(score / 10) * 100}%`;
 
   // Update map zoom
   useEffect(() => {
@@ -1315,7 +1718,7 @@ const CadreagoApp = () => {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Property Owner
+              Host
             </button>
           </div>
 
@@ -1376,7 +1779,7 @@ const CadreagoApp = () => {
               type="submit"
               className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
             >
-              {authMode === 'login' ? 'Login' : 'Sign Up'} as {formData.userType === 'guest' ? 'Guest' : 'Property Owner'}
+              {authMode === 'login' ? 'Login' : 'Sign Up'} as {formData.userType === 'guest' ? 'Guest' : 'Host'}
             </button>
           </form>
 
@@ -1560,7 +1963,7 @@ const CadreagoApp = () => {
                     I am a Host
                   </button>
                   <button className="text-blue-600 hover:text-blue-700 font-medium">Help</button>
-                  <button 
+                  <button
                     onClick={() => {
                       setPreferredUserType('guest');
                       setAuthMode('login');
@@ -1652,7 +2055,7 @@ const CadreagoApp = () => {
                     </div>
                     <div>
                       <span className="text-gray-700 font-medium block">{user?.name}</span>
-                      <span className="text-xs text-gray-500">{userType === 'host' ? 'Property Owner' : 'Guest'}</span>
+                      <span className="text-xs text-gray-500">{userType === 'host' ? 'Host' : 'Guest'}</span>
                     </div>
                   </div>
                   <button 
@@ -1756,6 +2159,56 @@ const CadreagoApp = () => {
     )
   );
 
+  // Destination input with Google Places suggestions
+  const DestinationSearchInput = ({ inputRef, className = "" }) => (
+    <div className="relative">
+      <MapPin className="absolute left-3 top-3 text-gray-400 pointer-events-none" size={18} />
+      <input
+        ref={inputRef}
+        type="text"
+        value={destinationInput}
+        onChange={handleDestinationInputChange}
+        onFocus={() => {
+          if (suggestions.length > 0) setShowSuggestions(true);
+        }}
+        onBlur={handleSuggestionsBlur}
+        placeholder={locationLoading ? "Detecting location..." : "Where are you going?"}
+        className={`w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 ${className}`}
+      />
+
+      {/* Place suggestions dropdown */}
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.place_id}
+              type="button"
+              onClick={() => handleSelectSuggestion(suggestion)}
+              className="w-full px-4 py-3 text-left hover:bg-blue-50 transition-colors flex items-start space-x-3 border-b border-gray-100 last:border-b-0"
+            >
+              <MapPin size={18} className="text-gray-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-gray-900 truncate">
+                  {suggestion.structured_formatting?.main_text || suggestion.description.split(',')[0]}
+                </div>
+                <div className="text-sm text-gray-500 truncate">
+                  {suggestion.structured_formatting?.secondary_text || suggestion.description}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Loading indicator */}
+      {locationLoading && (
+        <div className="absolute right-3 top-3">
+          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+    </div>
+  );
+
   // Home Page
   const HomePage = () => (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
@@ -1771,51 +2224,7 @@ const CadreagoApp = () => {
               {/* Destination */}
               <div>
                 <label className="block text-left text-sm font-medium text-gray-700 mb-2">Destination</label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-3 text-gray-400" size={18} />
-                  <input
-                    ref={searchInputRefDesktop}
-                    type="text"
-                    defaultValue={searchQuery}
-                    onChange={(e) => {
-                      // Only show manual dropdown if autocomplete hasn't loaded
-                      if (!autocompleteRefDesktop.current) {
-                        const value = e.target.value;
-                        setSearchQuery(value);
-                        setSearchParams(prev => ({...prev, destination: value}));
-                        setShowDestinations(true);
-                      }
-                    }}
-                    onFocus={() => {
-                      // Only show manual dropdown if autocomplete hasn't loaded
-                      if (!autocompleteRefDesktop.current) {
-                        setShowDestinations(true);
-                      }
-                    }}
-                    onBlur={() => setTimeout(() => setShowDestinations(false), 200)}
-                    placeholder="Where are you going?"
-                    className="w-full pl-10 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
-                  />
-                  {showDestinations && filteredDestinations.length > 0 && !autocompleteRefDesktop.current && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                      {filteredDestinations.map((dest, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            setSearchQuery(dest);
-                            setSearchParams({...searchParams, destination: dest});
-                            setShowDestinations(false);
-                          }}
-                          className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center space-x-2"
-                        >
-                          <MapPin size={16} className="text-gray-400" />
-                          <span>{dest}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <DestinationSearchInput inputRef={searchInputRefDesktop} />
               </div>
 
               {/* Check-in */}
@@ -1985,6 +2394,16 @@ const CadreagoApp = () => {
     </div>
   );
 
+  // Handle hovering over hotel card in the list (does not move map)
+  const handleHotelCardHover = React.useCallback((hotelId) => {
+    setHoveredHotelId(hotelId);
+    // If you want zoom-on-hover, you can also set a zoomToHotelId state here.
+  }, []);
+
+  const handleHotelCardLeave = React.useCallback(() => {
+    setHoveredHotelId(null);
+  }, []);
+
   // Hotel Card matching exact design from image 2
   const HotelCard = ({ hotel }) => {
     // Calculate stars based on rating (0-10 scale converted to 0-5 stars)
@@ -1997,7 +2416,8 @@ const CadreagoApp = () => {
         setSelectedHotel(hotel);
         setCurrentView('details');
       }}
-      onMouseEnter={() => setMapSelectedHotel(hotel)}
+      onMouseEnter={() => setHoveredHotelId(hotel.id)}
+      onMouseLeave={() => setHoveredHotelId(null)}
     >
       <div className="flex flex-col md:flex-row">
         {/* Image Section */}
@@ -2060,6 +2480,26 @@ const CadreagoApp = () => {
                 )}
               </div>
 
+              {/* View on map button */}
+              {hotel.coordinates && (
+                <button
+                  type="button"
+                  className="inline-flex items-center text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline gap-1 mb-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setZoomToHotelId(hotel.id);
+                    // Optional: scroll to the map section
+                    const el = document.getElementById('cadreago-map-section');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                >
+                  <MapPin className="w-3 h-3" />
+                  View on map
+                </button>
+              )}
+
               {/* Free Cancellation Box - Compact */}
               {hotel.freeCancellation && (
                 <div className="border border-blue-400 rounded-lg p-2 mb-2 bg-blue-50">
@@ -2113,9 +2553,6 @@ const CadreagoApp = () => {
   // Search Results matching image 1
   const SearchResults = () => {
     const activeMapHotel = mapSelectedHotel;
-    const handleZoom = (delta) => {
-      setMapZoom(prev => Math.min(13, Math.max(4, prev + delta)));
-    };
 
     return (
     <div className="bg-gray-50 min-h-screen">
@@ -2136,51 +2573,10 @@ const CadreagoApp = () => {
             {/* Destination Input */}
             <div>
               <label className="block text-sm text-gray-600 mb-1">Destination</label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  defaultValue={searchQuery}
-                  onChange={(e) => {
-                    // Only show manual dropdown if autocomplete hasn't loaded
-                    if (!autocompleteRef.current) {
-                      const value = e.target.value;
-                      setSearchQuery(value);
-                      setSearchParams(prev => ({...prev, destination: value}));
-                      setShowDestinations(true);
-                    }
-                  }}
-                  onFocus={() => {
-                    // Only show manual dropdown if autocomplete hasn't loaded
-                    if (!autocompleteRef.current) {
-                      setShowDestinations(true);
-                    }
-                  }}
-                  onBlur={() => setTimeout(() => setShowDestinations(false), 200)}
-                  placeholder="Where are you going?"
-                  className="w-full pl-10 pr-3 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm md:text-base"
-                />
-                {showDestinations && filteredDestinations.length > 0 && !autocompleteRef.current && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    {filteredDestinations.map((dest, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setSearchQuery(dest);
-                          setSearchParams({...searchParams, destination: dest});
-                          setShowDestinations(false);
-                        }}
-                        className="w-full px-4 py-2 text-left hover:bg-blue-50 transition-colors flex items-center space-x-2"
-                      >
-                        <MapPin size={16} className="text-gray-400" />
-                        <span className="text-sm md:text-base">{dest}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <DestinationSearchInput
+                inputRef={searchInputRef}
+                className="text-sm md:text-base py-2.5 md:py-3"
+              />
             </div>
 
             {/* Check-in Date */}
@@ -2336,41 +2732,19 @@ const CadreagoApp = () => {
           </div>
 
           {/* Map */}
-          <div className="lg:col-span-2">
+              <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow-md p-4 lg:sticky lg:top-24">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-semibold text-gray-900">Map view</h3>
                   <p className="text-xs text-gray-500">Tap price to preview the property</p>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <div className="flex bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => handleZoom(1)}
-                      disabled={mapZoom >= 13}
-                      className={`px-3 py-1 text-lg font-semibold text-gray-700 hover:bg-gray-50 ${mapZoom >= 13 ? 'opacity-40 cursor-not-allowed' : ''}`}
-                    >
-                      +
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleZoom(-1)}
-                      disabled={mapZoom <= 4}
-                      className={`px-3 py-1 text-lg font-semibold text-gray-700 border-l border-gray-200 hover:bg-gray-50 ${mapZoom <= 4 ? 'opacity-40 cursor-not-allowed' : ''}`}
-                    >
-                      −
-                    </button>
-                  </div>
-                  <button className="text-sm text-blue-600 hover:text-blue-700" onClick={() => setMapSelectedHotel(null)}>
-                    Reset
-                  </button>
-                </div>
               </div>
 
               {/* Map container - floats with scroll */}
               <div
-                className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-slate-200 via-slate-100 to-slate-300"
+                id="cadreago-map-section"
+                className="relative rounded-2xl overflow-hidden"
                 style={{ height: '560px' }}
               >
                 {/* Loading overlay */}
@@ -2388,42 +2762,34 @@ const CadreagoApp = () => {
                   </div>
                 )}
 
-                <div className="w-full h-full rounded-2xl">
-                  <gmp-map
-                    center={`${initialMapCenter.lat},${initialMapCenter.lng}`}
-                    zoom={mapZoom}
-                    map-id={process.env.REACT_APP_GOOGLE_MAPS_MAP_ID || undefined}
-                    className="w-full h-full rounded-2xl"
-                    onMapReady={handleMapReady}
-                    onClick={() => setMapSelectedHotel(null)}
-                  >
-                    {displayedHotels.filter(h => h.coordinates).map((hotel) => {
-                      const position = `${hotel.coordinates.lat},${hotel.coordinates.lng}`;
-                      const isActive = mapSelectedHotel?.id === hotel.id;
-                      return (
-                        <gmp-advanced-marker
-                          key={hotel.id}
-                          position={position}
-                          title={hotel.name}
-                        >
-                          <div
-                            slot="content"
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`View ${hotel.name}`}
-                            style={getPriceMarkerStyle(isActive)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setMapSelectedHotel(hotel);
-                            }}
-                          >
-                            {formatCurrency(hotel.price, hotel.currency)}
-                          </div>
-                        </gmp-advanced-marker>
-                      );
-                    })}
-                  </gmp-map>
-                </div>
+                {/* Search this area button - Airbnb style */}
+                {mapDirty && (
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+                    <button
+                      onClick={() => {
+                        setShowMapViewHotels(true);
+                        setMapDirty(false);
+                      }}
+                      className="px-4 py-2 rounded-full bg-white/90 shadow-md text-sm font-semibold text-gray-800 hover:bg-white hover:shadow-lg transition-all"
+                    >
+                      Search this area
+                    </button>
+                  </div>
+                )}
+
+                <GoogleMap
+                  ref={googleMapRef}
+                  height="560px"
+                  mapId={process.env.REACT_APP_GOOGLE_MAPS_MAP_ID}
+                  hotels={displayedHotels}
+                  onHotelClick={handleHotelMarkerClick}
+                  onHotelHover={handleHotelMarkerHover}
+                  hoveredHotelId={hoveredHotelId}
+                  selectedHotelId={mapSelectedHotel?.id}
+                  zoomToHotelId={zoomToHotelId}
+                  onMapReady={handleMapReady}
+                  onBoundsChanged={handleBoundsChanged}
+                />
 
                 {/* Property card overlay - positioned absolutely so it doesn't affect map height */}
                 {activeMapHotel && (
@@ -2435,6 +2801,7 @@ const CadreagoApp = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         setMapSelectedHotel(null);
+                        setHoveredHotelId(null);
                       }}
                     >
                       <X size={16} />
@@ -3633,46 +4000,79 @@ const CadreagoApp = () => {
       phone: '',
       address: ''
     });
-    const [aadhaar, setAadhaar] = React.useState({ number: '', status: 'pending' });
-    const [gstRegistered, setGstRegistered] = React.useState(false);
-    const [gst, setGst] = React.useState({ number: '', status: 'pending' });
-    const [bank, setBank] = React.useState({ account: '', ifsc: '', status: 'pending' });
 
-    const statusBadge = (status) => (
-      <span
-        className={`px-2 py-1 rounded-full text-xs font-semibold ${
-          status === 'verified'
-            ? 'bg-green-100 text-green-700'
-            : status === 'pending'
-            ? 'bg-yellow-100 text-yellow-700'
-            : 'bg-gray-100 text-gray-700'
-        }`}
-      >
-        {status.charAt(0).toUpperCase() + status.slice(1)}
-      </span>
-    );
+    // Local copies of verification fields to avoid resetting the form
+    // whenever parent state (aadhaar/gst/bank) changes.
+    const [aadhaarLocal, setAadhaarLocal] = React.useState(aadhaar);
+    const [gstRegisteredLocal, setGstRegisteredLocal] = React.useState(gstRegistered);
+    const [gstLocal, setGstLocal] = React.useState(gst);
+    const [bankLocal, setBankLocal] = React.useState(bank);
 
-    const handleVerification = (type) => {
-      if (type === 'aadhaar' && aadhaar.number.length >= 10) {
-        setAadhaar({ ...aadhaar, status: 'verified' });
-        alert('Aadhaar verification simulated via Cashfree API.');
-      } else if (type === 'gst' && gst.number.length >= 5) {
-        setGst({ ...gst, status: 'verified' });
-        alert('GST verification simulated via Cashfree API.');
-      } else if (type === 'bank' && bank.account && bank.ifsc) {
-        setBank({ ...bank, status: 'verified' });
-        alert('Bank account verification simulated via Cashfree API.');
-      } else {
-        alert('Please enter valid information before verification.');
+    // Placeholder – verification will be performed later via a separate flow.
+    const handleVerification = () => {
+      alert('We will verify these details after you save them. For now, please fill in all required information and complete onboarding.');
+    };
+
+    const handleCompleteOnboarding = async () => {
+      if (!user?.id) return;
+
+      const fullNameParts = [personalInfo.firstName, personalInfo.lastName].filter(Boolean);
+      const fullName = fullNameParts.join(' ').trim();
+
+      try {
+        // Persist basic profile details
+        const profileUpdates = {};
+        if (fullName) profileUpdates.full_name = fullName;
+        if (personalInfo.phone) profileUpdates.phone = personalInfo.phone;
+
+        if (Object.keys(profileUpdates).length > 0) {
+          await updateProfile(user.id, profileUpdates);
+        }
+
+        const isHostVerified = false; // Initial onboarding only collects data; verification happens later
+
+        const hostInfoPayload = {
+          aadhaar_number: aadhaarLocal.number || null,
+          aadhaar_status: 'pending',
+          gst_registered: gstRegisteredLocal,
+          gst_number: gstRegisteredLocal ? (gstLocal.number || null) : null,
+          gst_status: gstRegisteredLocal ? 'pending' : 'pending',
+          bank_account_number: bankLocal.account || null,
+          bank_ifsc: bankLocal.ifsc || null,
+          bank_status: 'pending',
+          onboarding_completed: true,
+          verified: isHostVerified
+        };
+
+        const { error } = await updateHostInfo(user.id, hostInfoPayload);
+        if (error) {
+          showNotification('error', 'We could not save your host details. Please try again.');
+          return;
+        }
+
+        // Sync local state back to global so other parts of the app
+        // see the latest values (still marked as pending).
+        setAadhaar({ ...aadhaarLocal, status: 'pending' });
+        setGstRegistered(gstRegisteredLocal);
+        setGst({ ...gstLocal, status: 'pending' });
+        setBank({ ...bankLocal, status: 'pending' });
+
+        setHostOnboardingCompleted(true);
+        setCurrentView('host-dashboard');
+        showNotification('success', 'Your host account has been created. We will verify your details soon.');
+      } catch (err) {
+        console.error('Error completing host onboarding:', err);
+        showNotification('error', 'We could not complete your host onboarding. Please try again.');
       }
     };
 
     const canComplete =
-      aadhaar.status === 'verified' &&
-      bank.status === 'verified' &&
-      (!gstRegistered || gst.status === 'verified') &&
       personalInfo.firstName &&
-      personalInfo.phone;
+      personalInfo.phone &&
+      aadhaarLocal.number &&
+      bankLocal.account &&
+      bankLocal.ifsc &&
+      (!gstRegisteredLocal || gstLocal.number);
 
     return (
       <div className="min-h-screen bg-gray-50">
@@ -3734,23 +4134,24 @@ const CadreagoApp = () => {
           <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">Aadhaar KYC</h2>
-              {statusBadge(aadhaar.status)}
+              {statusBadge('pending')}
             </div>
             <p className="text-sm text-gray-600">We’ll use Cashfree KYC APIs to verify your identity securely.</p>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input
                 type="text"
-                value={aadhaar.number}
-                onChange={(e) => setAadhaar({ ...aadhaar, number: e.target.value })}
+                value={aadhaarLocal.number}
+                onChange={(e) => setAadhaarLocal({ ...aadhaarLocal, number: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 placeholder="Aadhaar Number"
               />
               <button
                 type="button"
-                onClick={() => handleVerification('aadhaar')}
-                className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                onClick={handleVerification}
+                className="px-4 py-3 bg-gray-200 text-gray-600 rounded-lg cursor-not-allowed font-semibold"
+                disabled
               >
-                Verify via Cashfree
+                Verification will be done later
               </button>
             </div>
           </div>
@@ -3758,37 +4159,38 @@ const CadreagoApp = () => {
           <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">GST Details</h2>
-              {gstRegistered ? statusBadge(gst.status) : <span className="text-sm text-gray-500">Optional</span>}
+              {gstRegisteredLocal ? statusBadge('pending') : <span className="text-sm text-gray-500">Optional</span>}
             </div>
             <div className="flex items-center space-x-2 text-sm text-gray-600">
               <input
                 type="checkbox"
-                checked={gstRegistered}
+                checked={gstRegisteredLocal}
                 onChange={(e) => {
-                  setGstRegistered(e.target.checked);
+                  setGstRegisteredLocal(e.target.checked);
                   if (!e.target.checked) {
-                    setGst({ number: '', status: 'pending' });
+                    setGstLocal({ number: '', status: 'pending' });
                   }
                 }}
                 className="accent-blue-600"
               />
               <span>My business is registered under GST</span>
             </div>
-            {gstRegistered && (
+            {gstRegisteredLocal && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <input
                   type="text"
-                  value={gst.number}
-                  onChange={(e) => setGst({ ...gst, number: e.target.value })}
+                  value={gstLocal.number}
+                  onChange={(e) => setGstLocal({ ...gstLocal, number: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="GSTIN"
                 />
                 <button
                   type="button"
-                  onClick={() => handleVerification('gst')}
-                  className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                  onClick={handleVerification}
+                  className="px-4 py-3 bg-gray-200 text-gray-600 rounded-lg cursor-not-allowed font-semibold"
+                  disabled
                 >
-                  Verify via Cashfree
+                  Verification will be done later
                 </button>
               </div>
             )}
@@ -3797,7 +4199,7 @@ const CadreagoApp = () => {
           <div className="bg-white rounded-lg shadow-md p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">Bank Account</h2>
-              {statusBadge(bank.status)}
+              {statusBadge('pending')}
             </div>
             <p className="text-sm text-gray-600">
               Provide an INR bank account for payouts. We’ll verify account holder name using Cashfree Payout APIs.
@@ -3807,8 +4209,8 @@ const CadreagoApp = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
                 <input
                   type="text"
-                  value={bank.account}
-                  onChange={(e) => setBank({ ...bank, account: e.target.value })}
+                  value={bankLocal.account}
+                  onChange={(e) => setBankLocal({ ...bankLocal, account: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="XXXXXXXXXXXX"
                 />
@@ -3817,8 +4219,8 @@ const CadreagoApp = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">IFSC Code</label>
                 <input
                   type="text"
-                  value={bank.ifsc}
-                  onChange={(e) => setBank({ ...bank, ifsc: e.target.value })}
+                  value={bankLocal.ifsc}
+                  onChange={(e) => setBankLocal({ ...bankLocal, ifsc: e.target.value })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase"
                   placeholder="SBIN0000000"
                 />
@@ -3826,10 +4228,11 @@ const CadreagoApp = () => {
             </div>
             <button
               type="button"
-              onClick={() => handleVerification('bank')}
-              className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+              onClick={handleVerification}
+              className="px-4 py-3 bg-gray-200 text-gray-600 rounded-lg cursor-not-allowed font-semibold"
+              disabled
             >
-              Verify Bank via Cashfree
+              Verification will be done later
             </button>
           </div>
 
@@ -3841,10 +4244,7 @@ const CadreagoApp = () => {
             <button
               type="button"
               disabled={!canComplete}
-              onClick={() => {
-                setHostOnboardingCompleted(true);
-                setCurrentView('host-dashboard');
-              }}
+              onClick={handleCompleteOnboarding}
               className={`px-6 py-3 rounded-lg font-semibold ${
                 canComplete ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'
               }`}
@@ -3880,14 +4280,225 @@ const CadreagoApp = () => {
       );
     }
 
+    const totalProperties = hostProperties.length;
     const totalRevenue = hostProperties.reduce((sum, p) => sum + p.monthlyRevenue, 0);
     const totalBookings = hostProperties.reduce((sum, p) => sum + p.totalBookings, 0);
-    const avgOccupancy = Math.round(hostProperties.reduce((sum, p) => sum + p.occupancyRate, 0) / hostProperties.length);
+    const avgOccupancy =
+      totalProperties > 0
+        ? Math.round(hostProperties.reduce((sum, p) => sum + p.occupancyRate, 0) / totalProperties)
+        : 0;
+    const hostIsVerified = aadhaar.status === 'verified' && bank.status === 'verified';
+    const revenueLastMonth = Math.round(totalRevenue * 0.88);
+    const revenueYtd = Math.round(totalRevenue * 3.2);
+
+    const HostProfileKycForm = () => {
+      const [formState, setFormState] = React.useState({
+        fullName: user?.name || '',
+        phone: '',
+        address: '',
+        aadhaarNumber: aadhaar.number || '',
+        gstRegistered: gstRegistered,
+        gstNumber: gst.number || '',
+        bankAccount: bank.account || '',
+        bankIfsc: bank.ifsc || ''
+      });
+
+      const handleChange = (field, value) => {
+        setFormState((prev) => ({ ...prev, [field]: value }));
+      };
+
+      const handleSave = async (e) => {
+        e.preventDefault();
+        if (!user?.id) return;
+
+        const profileUpdates = {};
+        if (formState.fullName) profileUpdates.full_name = formState.fullName;
+        if (formState.phone) profileUpdates.phone = formState.phone;
+
+        try {
+          if (Object.keys(profileUpdates).length > 0) {
+            await updateProfile(user.id, profileUpdates);
+          }
+
+          const hostInfoPayload = {
+            aadhaar_number: formState.aadhaarNumber || null,
+            gst_registered: formState.gstRegistered,
+            gst_number: formState.gstRegistered ? (formState.gstNumber || null) : null,
+            bank_account_number: formState.bankAccount || null,
+            bank_ifsc: formState.bankIfsc || null
+          };
+
+          const { error } = await updateHostInfo(user.id, hostInfoPayload);
+          if (error) {
+            showNotification('error', 'We could not save your host profile details. Please try again.');
+            return;
+          }
+
+          // Sync global state so the rest of the app sees updated values
+          setAadhaar((prev) => ({ ...prev, number: formState.aadhaarNumber || '' }));
+          setGstRegistered(formState.gstRegistered);
+          setGst((prev) => ({ ...prev, number: formState.gstNumber || '' }));
+          setBank((prev) => ({ ...prev, account: formState.bankAccount || '', ifsc: formState.bankIfsc || '' }));
+
+          showNotification('success', 'Host profile and KYC details saved.');
+        } catch (err) {
+          console.error('Error saving host profile/KYC:', err);
+          showNotification('error', 'We could not save your host profile details. Please try again.');
+        }
+      };
+
+      return (
+        <form onSubmit={handleSave} className="space-y-6">
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">Personal Details</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={formState.fullName}
+                  onChange={(e) => handleChange('fullName', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Full name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                <input
+                  type="tel"
+                  value={formState.phone}
+                  onChange={(e) => handleChange('phone', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="+91 90000 00000"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <input
+                  type="text"
+                  value={formState.address}
+                  onChange={(e) => handleChange('address', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="City, State"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">Aadhaar KYC</h3>
+              {statusBadge(aadhaar.status || 'pending')}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                value={formState.aadhaarNumber}
+                onChange={(e) => handleChange('aadhaarNumber', e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="Aadhaar Number"
+              />
+              <button
+                type="button"
+                onClick={() => showNotification('info', 'Aadhaar verification will be enabled in a later step.')}
+                className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold"
+              >
+                Manage Verification (coming soon)
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">GST Details</h3>
+              {gstRegistered ? statusBadge(gst.status || 'pending') : <span className="text-sm text-gray-500">Optional</span>}
+            </div>
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={formState.gstRegistered}
+                onChange={(e) => handleChange('gstRegistered', e.target.checked)}
+                className="accent-blue-600"
+              />
+              <span>My business is registered under GST</span>
+            </div>
+            {formState.gstRegistered && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <input
+                  type="text"
+                  value={formState.gstNumber}
+                  onChange={(e) => handleChange('gstNumber', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="GSTIN"
+                />
+                <button
+                  type="button"
+                  onClick={() => showNotification('info', 'GST verification will be enabled in a later step.')}
+                  className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold"
+                >
+                  Manage Verification (coming soon)
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg border p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">Bank Account</h3>
+              {statusBadge(bank.status || 'pending')}
+            </div>
+            <p className="text-sm text-gray-600">
+              Provide an INR bank account for payouts. We’ll verify account holder name using Cashfree Payout APIs.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                <input
+                  type="text"
+                  value={formState.bankAccount}
+                  onChange={(e) => handleChange('bankAccount', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="XXXXXXXXXXXX"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">IFSC Code</label>
+                <input
+                  type="text"
+                  value={formState.bankIfsc}
+                  onChange={(e) => handleChange('bankIfsc', e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase"
+                  placeholder="SBIN0000000"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => showNotification('info', 'Bank verification will be enabled in a later step.')}
+              className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold"
+            >
+              Manage Verification (coming soon)
+            </button>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+            >
+              Save Profile & KYC
+            </button>
+          </div>
+        </form>
+      );
+    };
 
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
             <h1 className="text-3xl font-bold text-gray-900">Host Dashboard</h1>
             <div className="flex flex-wrap gap-3">
               <button 
@@ -3896,17 +4507,25 @@ const CadreagoApp = () => {
               >
                 <span>+ Add Property</span>
               </button>
-              <button 
-                onClick={() => {
-                  setAddonForm({ propertyId: hostProperties[0]?.id || '', name: '', description: '', price: '' });
-                  setShowAddAddonModal(true);
-                }}
-                className="px-6 py-3 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors font-semibold flex items-center space-x-2"
-              >
-                <span>+ Create Add-on</span>
-              </button>
             </div>
           </div>
+
+          {!hostIsVerified && (
+            <div className="mb-6 bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-start space-x-3">
+              <div className="mt-0.5">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-yellow-100 text-xs font-bold">
+                  !
+                </span>
+              </div>
+              <div className="text-sm">
+                <p className="font-semibold">Verification required before listing properties</p>
+                <p className="mt-1">
+                  Your Aadhaar KYC and bank account details are saved but not verified yet. 
+                  We’ll verify these details and then enable property listings and payouts.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Stats Overview */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -3914,7 +4533,7 @@ const CadreagoApp = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Total Properties</p>
-                  <p className="text-3xl font-bold text-gray-900">{hostProperties.length}</p>
+                  <p className="text-3xl font-bold text-gray-900">{totalProperties}</p>
                 </div>
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                   <span className="text-2xl">🏨</span>
@@ -3926,7 +4545,7 @@ const CadreagoApp = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Monthly Revenue</p>
-                  <p className="text-3xl font-bold text-green-600">${totalRevenue.toLocaleString()}</p>
+                  <p className="text-3xl font-bold text-green-600">{formatCurrency(totalRevenue)}</p>
                 </div>
                 <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                   <span className="text-2xl">💰</span>
@@ -3968,7 +4587,8 @@ const CadreagoApp = () => {
                 { id: 'revenue', label: 'Revenue', icon: '💰' },
                 { id: 'refunds', label: 'Refunds', icon: '↩️', count: hostRefunds.filter(r => r.status === 'pending').length },
                 { id: 'payouts', label: 'Payouts', icon: '💳' },
-                { id: 'reviews', label: 'Reviews', icon: '⭐' }
+                { id: 'reviews', label: 'Reviews', icon: '⭐' },
+                { id: 'profile', label: 'Profile & KYC', icon: '🛡️' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -4024,8 +4644,11 @@ const CadreagoApp = () => {
                               </div>
                             </div>
                             <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                              property.status === 'active' ? 'bg-green-100 text-green-800' :
-                              'bg-yellow-100 text-yellow-800'
+                              property.status === 'active'
+                                ? 'bg-green-100 text-green-800'
+                                : property.status === 'pending'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-700'
                             }`}>
                               {property.status.charAt(0).toUpperCase() + property.status.slice(1)}
                             </span>
@@ -4050,7 +4673,7 @@ const CadreagoApp = () => {
                             </div>
                             <div>
                               <p className="text-gray-500">Base Price</p>
-                              <p className="font-semibold text-green-600">${property.basePrice}/night</p>
+                              <p className="font-semibold text-green-600">{formatCurrency(property.basePrice)}/night</p>
                             </div>
                             <div>
                               <p className="text-gray-500">Occupancy</p>
@@ -4058,7 +4681,7 @@ const CadreagoApp = () => {
                             </div>
                             <div>
                               <p className="text-gray-500">Revenue</p>
-                              <p className="font-semibold text-green-600">${property.monthlyRevenue}/mo</p>
+                              <p className="font-semibold text-green-600">{formatCurrency(property.monthlyRevenue)}/mo</p>
                             </div>
                           </div>
 
@@ -4075,14 +4698,39 @@ const CadreagoApp = () => {
                             <button
                               className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold"
                               onClick={() => {
-                                setAddonForm({ ...addonForm, propertyId: property.id });
+                                setAddonForm({
+                                  propertyId: property.id,
+                                  name: '',
+                                  description: '',
+                                  price: '',
+                                  icon: DEFAULT_ADDON_ICON
+                                });
                                 setShowAddAddonModal(true);
                               }}
                             >
                               Add Add-on
                             </button>
-                            <button className="px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm font-semibold">
-                              Deactivate
+                            <button
+                              disabled={!hostIsVerified}
+                              title={
+                                hostIsVerified
+                                  ? `${property.status === 'active' ? 'Deactivate' : 'Activate'} listing`
+                                  : 'Complete KYC and bank verification to activate this listing.'
+                              }
+                              onClick={() => {
+                                if (hostIsVerified) {
+                                  togglePropertyStatus(property.id);
+                                }
+                              }}
+                              className={`px-4 py-2 border rounded-lg transition-colors text-sm font-semibold ${
+                                !hostIsVerified
+                                  ? 'border-gray-200 text-gray-400 opacity-60 cursor-not-allowed hover:bg-transparent'
+                                  : property.status === 'active'
+                                  ? 'border-red-200 text-red-600 hover:bg-red-50'
+                                  : 'border-green-200 text-green-600 hover:bg-green-50'
+                              }`}
+                            >
+                              {property.status === 'active' ? 'Deactivate' : 'Activate'}
                             </button>
                           </div>
                         </div>
@@ -4173,38 +4821,42 @@ const CadreagoApp = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                   <div className="border rounded-lg p-6">
                     <p className="text-sm text-gray-600 mb-2">This Month</p>
-                    <p className="text-3xl font-bold text-green-600">${totalRevenue.toLocaleString()}</p>
+                    <p className="text-3xl font-bold text-green-600">{formatCurrency(totalRevenue)}</p>
                     <p className="text-sm text-green-600 mt-2">↑ 12% from last month</p>
                   </div>
                   <div className="border rounded-lg p-6">
                     <p className="text-sm text-gray-600 mb-2">Last Month</p>
-                    <p className="text-3xl font-bold text-gray-900">${Math.round(totalRevenue * 0.88).toLocaleString()}</p>
+                    <p className="text-3xl font-bold text-gray-900">{formatCurrency(revenueLastMonth)}</p>
                   </div>
                   <div className="border rounded-lg p-6">
                     <p className="text-sm text-gray-600 mb-2">Year to Date</p>
-                    <p className="text-3xl font-bold text-gray-900">${Math.round(totalRevenue * 3.2).toLocaleString()}</p>
+                    <p className="text-3xl font-bold text-gray-900">{formatCurrency(revenueYtd)}</p>
                   </div>
                 </div>
 
                 <h3 className="text-xl font-bold text-gray-900 mb-4">Revenue by Property</h3>
                 <div className="space-y-4">
-                  {hostProperties.map(property => (
-                    <div key={property.id} className="border rounded-lg p-4">
-                      <div className="flex justify-between items-center mb-2">
-                        <h4 className="font-semibold text-gray-900">{property.name}</h4>
-                        <span className="text-lg font-bold text-green-600">${property.monthlyRevenue}</span>
+                  {hostProperties.map(property => {
+                    const revenueShare = totalRevenue > 0 ? property.monthlyRevenue / totalRevenue : 0;
+                    const revenueSharePercent = Math.round(revenueShare * 100);
+                    return (
+                      <div key={property.id} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-2">
+                          <h4 className="font-semibold text-gray-900">{property.name}</h4>
+                          <span className="text-lg font-bold text-green-600">{formatCurrency(property.monthlyRevenue)}</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-green-600 h-2 rounded-full"
+                            style={{ width: `${revenueShare * 100}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-sm text-gray-600 mt-2">
+                          {revenueSharePercent}% of total revenue
+                        </p>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-green-600 h-2 rounded-full"
-                          style={{width: `${(property.monthlyRevenue / totalRevenue) * 100}%`}}
-                        ></div>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2">
-                        {Math.round((property.monthlyRevenue / totalRevenue) * 100)}% of total revenue
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -4331,6 +4983,20 @@ const CadreagoApp = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Profile & KYC Tab */}
+            {hostDashboardTab === 'profile' && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">Host Profile & KYC</h2>
+                  <p className="text-sm text-gray-600">
+                    Update your personal details and financial information. We’ll verify these details before enabling listings and payouts.
+                  </p>
+                </div>
+
+                <HostProfileKycForm />
               </div>
             )}
           </div>
@@ -4503,7 +5169,13 @@ const CadreagoApp = () => {
                 onSubmit={(e) => {
                   e.preventDefault();
                   alert('Add-on saved for host property!');
-                  setAddonForm({ propertyId: hostProperties[0]?.id || '', name: '', description: '', price: '' });
+                  setAddonForm({
+                    propertyId: hostProperties[0]?.id || '',
+                    name: '',
+                    description: '',
+                    price: '',
+                    icon: DEFAULT_ADDON_ICON
+                  });
                   setShowAddAddonModal(false);
                 }}
               >
@@ -4552,6 +5224,28 @@ const CadreagoApp = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="e.g. 1200"
                   />
+                </div>
+                <div>
+                  <p className="block text-sm font-medium text-gray-700 mb-1">Icon</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {ADDON_ICON_KEYS.map((iconKey) => {
+                      const isSelected = addonForm.icon === iconKey;
+                      return (
+                        <button
+                          key={iconKey}
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => setAddonForm({ ...addonForm, icon: iconKey })}
+                          className={`flex flex-col items-center justify-center border rounded-lg p-3 text-center focus:outline-none transition ${
+                            isSelected ? 'border-blue-600 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-200'
+                          }`}
+                        >
+                          <div className="text-2xl text-gray-700">{renderAddonIcon(iconKey, 22)}</div>
+                          <span className="text-xs text-gray-600 mt-1">{iconKey}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="flex justify-end space-x-3 pt-2">
                   <button
@@ -4660,6 +5354,31 @@ const CadreagoApp = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {notification && (
+        <div className="fixed top-4 right-4 z-50">
+          <div
+            className={`flex items-start space-x-3 px-4 py-3 rounded-lg shadow-md border text-sm ${
+              notification.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            <div className="mt-0.5">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white bg-opacity-70 text-xs font-bold">
+                {notification.type === 'success' ? '✓' : '!'}
+              </span>
+            </div>
+            <div className="flex-1">{notification.message}</div>
+            <button
+              onClick={() => setNotification(null)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <Header />
       
       <div className="flex-grow">

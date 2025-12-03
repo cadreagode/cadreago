@@ -28,6 +28,10 @@ body {
   min-height: 100vh;
 }
 
+gmp-map {
+  display: block;
+}
+
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
