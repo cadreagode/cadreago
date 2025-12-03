@@ -146,14 +146,40 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-const RADIUS_STEPS_KM = [5, 10, 25, 50];
+const AUTO_RADIUS_STEPS_KM = [5, 10, 25, 50];
 
-function getHotelsWithinBestRadius(searchLocation, hotels) {
+function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
+  const radiusFilterKm =
+    radiusFilterKmRaw === null || radiusFilterKmRaw === undefined
+      ? null
+      : Number(radiusFilterKmRaw);
+
   if (!searchLocation) {
-    return { hotels, radiusKm: null };
+    return { hotels, radiusKm: null, mode: 'no-location' };
   }
 
-  for (const radiusKm of RADIUS_STEPS_KM) {
+  // CASE 1: user chose a specific radius (STRICT)
+  if (radiusFilterKm !== null && !Number.isNaN(radiusFilterKm)) {
+    const radiusKm = radiusFilterKm;
+
+    const hotelsInRadius = hotels.filter((hotel) => {
+      if (!hotel.coordinates) return false;
+      const { lat, lng } = hotel.coordinates;
+      const d = haversineDistanceKm(
+        searchLocation.lat,
+        searchLocation.lng,
+        lat,
+        lng
+      );
+      return d <= radiusKm;
+    });
+
+    // No expanding or nearest fallback in fixed mode
+    return { hotels: hotelsInRadius, radiusKm, mode: 'fixed' };
+  }
+
+  // CASE 2: AUTO MODE – smart expanding radius
+  for (const radiusKm of AUTO_RADIUS_STEPS_KM) {
     const hotelsInRadius = hotels.filter((hotel) => {
       if (!hotel.coordinates) return false;
       const { lat, lng } = hotel.coordinates;
@@ -167,12 +193,13 @@ function getHotelsWithinBestRadius(searchLocation, hotels) {
     });
 
     if (hotelsInRadius.length >= 5) {
-      return { hotels: hotelsInRadius, radiusKm };
+      return { hotels: hotelsInRadius, radiusKm, mode: 'auto-radius' };
     }
   }
 
-  const maxRadius = RADIUS_STEPS_KM[RADIUS_STEPS_KM.length - 1];
-  const hotelsInRadius = hotels.filter((hotel) => {
+  // Fallback: within max radius
+  const maxRadius = AUTO_RADIUS_STEPS_KM[AUTO_RADIUS_STEPS_KM.length - 1];
+  let hotelsInRadius = hotels.filter((hotel) => {
     if (!hotel.coordinates) return false;
     const { lat, lng } = hotel.coordinates;
     const d = haversineDistanceKm(
@@ -184,7 +211,38 @@ function getHotelsWithinBestRadius(searchLocation, hotels) {
     return d <= maxRadius;
   });
 
-  return { hotels: hotelsInRadius, radiusKm: maxRadius };
+  if (hotelsInRadius.length > 0) {
+    return { hotels: hotelsInRadius, radiusKm: maxRadius, mode: 'auto-max' };
+  }
+
+  // Ultimate fallback: nearest anywhere (ONLY in auto mode)
+  if (hotels.length === 0) {
+    return { hotels: [], radiusKm: null, mode: 'auto-empty' };
+  }
+
+  let nearest = null;
+  let nearestDistance = Infinity;
+
+  for (const hotel of hotels) {
+    if (!hotel.coordinates) continue;
+    const { lat, lng } = hotel.coordinates;
+    const d = haversineDistanceKm(
+      searchLocation.lat,
+      searchLocation.lng,
+      lat,
+      lng
+    );
+    if (d < nearestDistance) {
+      nearestDistance = d;
+      nearest = hotel;
+    }
+  }
+
+  return {
+    hotels: nearest ? [nearest] : [],
+    radiusKm: nearestDistance,
+    mode: 'auto-nearest',
+  };
 }
 
 const DestinationSearchInput = ({
@@ -377,6 +435,7 @@ const CadreagoApp = () => {
   const [showMapViewHotels, setShowMapViewHotels] = useState(false);
   const [mapDirty, setMapDirty] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [radiusFilterKm, setRadiusFilterKm] = useState(null); // null = auto
 
   // NEW: Improved search state
   const [destinationInput, setDestinationInput] = useState('');
@@ -1023,69 +1082,20 @@ const CadreagoApp = () => {
 
         console.log('Place components:', placeComponents);
 
-        // Radius-based subset around the chosen place
         const searchCenter = searchLocation || { lat: searchLat, lng: searchLng };
-        const { hotels: radiusHotels, radiusKm } = getHotelsWithinBestRadius(searchCenter, hotels);
-        const radiusHotelSet = new Set(radiusHotels);
+        const { hotels: radiusHotels, radiusKm, mode: radiusMode } =
+          getHotelsForSearchLocation(searchCenter, hotels, radiusFilterKm);
 
         console.log('Radius-based filtering:', {
           center: searchCenter,
           radiusKm,
+          mode: radiusMode,
           total: hotels.length,
           inRadius: radiusHotels.length
         });
 
-        filtered = hotels.filter(hotel => {
-          const inRadius = radiusHotelSet.has(hotel);
-
-          if (inRadius) {
-            console.log('✓ Match by distance:', hotel.name, '- within', radiusKm, 'km');
-            return true;
-          }
-
-          // Fallback: Match by state/city/location text for hotels without coordinates
-          const hotelLocation = hotel.location?.toLowerCase() || '';
-          const hotelCity = hotel.city?.toLowerCase() || '';
-          const hotelCountry = hotel.country?.toLowerCase() || '';
-          const hotelName = hotel.name?.toLowerCase() || '';
-
-          console.log('Hotel text fields (fallback):', {
-            name: hotel.name,
-            location: hotelLocation,
-            city: hotelCity,
-            country: hotelCountry
-          });
-
-          // Check if hotel matches place name or formatted address
-          const matchesPlaceName = placeComponents.placeName && (
-            hotelLocation.includes(placeComponents.placeName) ||
-            hotelCity.includes(placeComponents.placeName) ||
-            hotelName.includes(placeComponents.placeName)
-          );
-
-          // Check if hotel is in the same state or city
-          const matchesState = placeComponents.state && (
-            hotelLocation.includes(placeComponents.state) ||
-            placeComponents.formattedAddress.split(',').some(part =>
-              hotelLocation.includes(part.trim().toLowerCase())
-            )
-          );
-
-          const matchesCity = placeComponents.city && (
-            hotelCity.includes(placeComponents.city) ||
-            hotelLocation.includes(placeComponents.city)
-          );
-
-          const matchesCountry = placeComponents.country && hotelCountry.includes(placeComponents.country);
-
-          if (matchesPlaceName || (matchesCountry && (matchesState || matchesCity))) {
-            console.log('✓ Match by location text:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
-            return true;
-          }
-
-          return false;
-        });
-
+        // Use only the radius-based subset when a place is selected
+        filtered = radiusHotels;
         console.log('Filtered', filtered.length, 'properties for', selectedPlace.name);
       } else {
         // Fallback: Text-based search (when Google Places hasn't loaded or user typed manually)
@@ -1175,7 +1185,7 @@ const CadreagoApp = () => {
     }
 
     return filtered;
-  }, [hotels, selectedPlace, searchParams.destination, filters, sortBy, searchLocation]);
+  }, [hotels, selectedPlace, searchParams.destination, filters, sortBy, searchLocation, radiusFilterKm]);
 
   // Check if a coordinate is within map bounds
   const isWithinBounds = (lat, lng, bounds) => {
@@ -2403,6 +2413,15 @@ const CadreagoApp = () => {
   );
 
   // Filter row
+  const RADIUS_OPTIONS = [
+    { label: 'Auto (recommended)', value: null },
+    { label: '5 km', value: 5 },
+    { label: '10 km', value: 10 },
+    { label: '15 km', value: 15 },
+    { label: '20 km', value: 20 },
+    { label: '25 km', value: 25 },
+  ];
+
   const FilterBar = () => (
     <div className="bg-white rounded-lg shadow-md p-4 flex flex-col gap-4 overflow-x-auto">
       <div className="flex items-center space-x-3">
@@ -2419,15 +2438,36 @@ const CadreagoApp = () => {
             </span>
           </div>
           <div className="space-y-2">
-            <input
-              type="range"
-              min="0"
-              max="100000"
-              step="1000"
-              value={filters.priceRange[1]}
-              onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Number(e.target.value)]})}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-            />
+            <div className="relative h-4 flex items-center">
+              <input
+                type="range"
+                min="0"
+                max="100000"
+                step="1000"
+                value={filters.priceRange[0]}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  const max = filters.priceRange[1];
+                  const nextMin = Math.min(raw, max - 1000);
+                  setFilters({ ...filters, priceRange: [nextMin, max] });
+                }}
+                className="absolute inset-0 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <input
+                type="range"
+                min="0"
+                max="100000"
+                step="1000"
+                value={filters.priceRange[1]}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  const min = filters.priceRange[0];
+                  const nextMax = Math.max(raw, min + 1000);
+                  setFilters({ ...filters, priceRange: [min, nextMax] });
+                }}
+                className="absolute inset-0 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
             <div className="flex gap-2">
               <input
                 type="number"
@@ -2446,6 +2486,8 @@ const CadreagoApp = () => {
             </div>
           </div>
         </div>
+
+        {/* Rating filter */}
         <select
           value={filters.rating}
           onChange={(e) => setFilters({...filters, rating: e.target.value})}
@@ -2457,6 +2499,8 @@ const CadreagoApp = () => {
           <option value="7">7+ Good</option>
           <option value="6">6+ Pleasant</option>
         </select>
+
+        {/* Type filter */}
         <select
           value={filters.type}
           onChange={(e) => setFilters({...filters, type: e.target.value})}
@@ -2469,6 +2513,34 @@ const CadreagoApp = () => {
           <option value="farmstays">Farm stays</option>
           <option value="apartments">Apartments</option>
         </select>
+
+        {/* Radius filter */}
+        <div className="flex-1 md:flex-none">
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-slate-600">Search radius</div>
+            <div className="flex flex-wrap gap-2">
+              {RADIUS_OPTIONS.map((opt) => {
+                const isActive = radiusFilterKm === opt.value;
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => setRadiusFilterKm(opt.value)}
+                    className={
+                      'rounded-full px-3 py-1 text-xs border ' +
+                      (isActive
+                        ? 'bg-sky-600 text-white border-sky-600'
+                        : 'bg-white text-slate-700 border-slate-300')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={() => setShowMoreFilters(!showMoreFilters)}
