@@ -131,6 +131,62 @@ const getPriceMarkerStyle = (active) => ({
   transform: active ? 'scale(1.1)' : 'scale(1)',
 });
 
+// Distance helpers for radius-based hotel filtering
+function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+const RADIUS_STEPS_KM = [5, 10, 25, 50];
+
+function getHotelsWithinBestRadius(searchLocation, hotels) {
+  if (!searchLocation) {
+    return { hotels, radiusKm: null };
+  }
+
+  for (const radiusKm of RADIUS_STEPS_KM) {
+    const hotelsInRadius = hotels.filter((hotel) => {
+      if (!hotel.coordinates) return false;
+      const { lat, lng } = hotel.coordinates;
+      const d = haversineDistanceKm(
+        searchLocation.lat,
+        searchLocation.lng,
+        lat,
+        lng
+      );
+      return d <= radiusKm;
+    });
+
+    if (hotelsInRadius.length >= 5) {
+      return { hotels: hotelsInRadius, radiusKm };
+    }
+  }
+
+  const maxRadius = RADIUS_STEPS_KM[RADIUS_STEPS_KM.length - 1];
+  const hotelsInRadius = hotels.filter((hotel) => {
+    if (!hotel.coordinates) return false;
+    const { lat, lng } = hotel.coordinates;
+    const d = haversineDistanceKm(
+      searchLocation.lat,
+      searchLocation.lng,
+      lat,
+      lng
+    );
+    return d <= maxRadius;
+  });
+
+  return { hotels: hotelsInRadius, radiusKm: maxRadius };
+}
+
 const DestinationSearchInput = ({
   value,
   onChange,
@@ -300,6 +356,7 @@ const CadreagoApp = () => {
   const destinationInputFocusedRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlace, setSelectedPlace] = useState(null);
+  const [searchLocation, setSearchLocation] = useState(null); // { lat, lng } for radius filtering
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [searchParams, setSearchParams] = useState({
     destination: '',
@@ -927,18 +984,6 @@ const CadreagoApp = () => {
   }, []); // Only run once on mount
 
   // Calculate distance between two coordinates (Haversine formula)
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a =
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  };
-
   // Add state for sorting
   const [sortBy, setSortBy] = useState('');
 
@@ -978,90 +1023,68 @@ const CadreagoApp = () => {
 
         console.log('Place components:', placeComponents);
 
-        // Use larger radius for India (500km to cover entire states)
-        // Check if place is in India from address components OR formatted address
-        const isInIndia = placeComponents.country === 'india' ||
-                          placeComponents.formattedAddress.includes('india') ||
-                          placeComponents.formattedAddress.includes('kerala') ||
-                          placeComponents.formattedAddress.includes('karnataka') ||
-                          placeComponents.formattedAddress.includes('tamil nadu');
-        const radiusKm = isInIndia ? 500 : 100;
-        console.log('Search radius:', radiusKm, 'km', '- Is in India:', isInIndia);
+        // Radius-based subset around the chosen place
+        const searchCenter = searchLocation || { lat: searchLat, lng: searchLng };
+        const { hotels: radiusHotels, radiusKm } = getHotelsWithinBestRadius(searchCenter, hotels);
+        const radiusHotelSet = new Set(radiusHotels);
 
-        filtered = hotels.filter(hotel => {
-        // First try coordinate-based distance matching
-        if (hotel.coordinates) {
-          const distance = calculateDistance(
-            searchLat,
-            searchLng,
-            hotel.coordinates.lat,
-            hotel.coordinates.lng
-          );
-          console.log('Checking hotel:', hotel.name, '- Distance:', distance.toFixed(0), 'km', '- Radius:', radiusKm, 'km');
-          if (distance <= radiusKm) {
-            console.log('✓ Match by distance:', hotel.name, '-', distance.toFixed(0), 'km');
-            return true;
-          }
-        } else {
-          console.log('Checking hotel:', hotel.name, '- No coordinates');
-        }
-
-        // Fallback: Match by state/city/location text
-        const hotelLocation = hotel.location?.toLowerCase() || '';
-        const hotelCity = hotel.city?.toLowerCase() || '';
-        const hotelCountry = hotel.country?.toLowerCase() || '';
-        const hotelName = hotel.name?.toLowerCase() || '';
-
-        console.log('Hotel text fields:', {
-          name: hotel.name,
-          location: hotelLocation,
-          city: hotelCity,
-          country: hotelCountry
+        console.log('Radius-based filtering:', {
+          center: searchCenter,
+          radiusKm,
+          total: hotels.length,
+          inRadius: radiusHotels.length
         });
 
-        // Check if hotel matches place name or formatted address
-        const matchesPlaceName = placeComponents.placeName && (
-          hotelLocation.includes(placeComponents.placeName) ||
-          hotelCity.includes(placeComponents.placeName) ||
-          hotelName.includes(placeComponents.placeName)
-        );
+        filtered = hotels.filter(hotel => {
+          const inRadius = radiusHotelSet.has(hotel);
 
-        // Check if hotel is in the same state or city
-        const matchesState = placeComponents.state && (
-          hotelLocation.includes(placeComponents.state) ||
-          placeComponents.formattedAddress.split(',').some(part =>
-            hotelLocation.includes(part.trim().toLowerCase())
-          )
-        );
-
-        const matchesCity = placeComponents.city && (
-          hotelCity.includes(placeComponents.city) ||
-          hotelLocation.includes(placeComponents.city)
-        );
-
-        const matchesCountry = placeComponents.country && hotelCountry.includes(placeComponents.country);
-
-        // For India, be more lenient - match if same country or state appears in location
-        if (isInIndia) {
-          // Extract state name from formatted address (e.g., "Kerala" from the address)
-          const addressParts = placeComponents.formattedAddress.split(',').map(p => p.trim());
-          const stateMatch = addressParts.some(part =>
-            hotelLocation.includes(part) || hotelCity.includes(part)
-          );
-
-          if (stateMatch) {
-            console.log('✓ Match by India state/location:', hotel.name, '- Location:', hotel.location);
+          if (inRadius) {
+            console.log('✓ Match by distance:', hotel.name, '- within', radiusKm, 'km');
             return true;
           }
-        }
 
-        if (matchesPlaceName || (matchesCountry && (matchesState || matchesCity))) {
-          console.log('✓ Match by location text:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
-          return true;
-        }
+          // Fallback: Match by state/city/location text for hotels without coordinates
+          const hotelLocation = hotel.location?.toLowerCase() || '';
+          const hotelCity = hotel.city?.toLowerCase() || '';
+          const hotelCountry = hotel.country?.toLowerCase() || '';
+          const hotelName = hotel.name?.toLowerCase() || '';
 
-        return false;
-      });
+          console.log('Hotel text fields (fallback):', {
+            name: hotel.name,
+            location: hotelLocation,
+            city: hotelCity,
+            country: hotelCountry
+          });
+
+          // Check if hotel matches place name or formatted address
+          const matchesPlaceName = placeComponents.placeName && (
+            hotelLocation.includes(placeComponents.placeName) ||
+            hotelCity.includes(placeComponents.placeName) ||
+            hotelName.includes(placeComponents.placeName)
+          );
+
+          // Check if hotel is in the same state or city
+          const matchesState = placeComponents.state && (
+            hotelLocation.includes(placeComponents.state) ||
+            placeComponents.formattedAddress.split(',').some(part =>
+              hotelLocation.includes(part.trim().toLowerCase())
+            )
+          );
+
+          const matchesCity = placeComponents.city && (
+            hotelCity.includes(placeComponents.city) ||
+            hotelLocation.includes(placeComponents.city)
+          );
+
+          const matchesCountry = placeComponents.country && hotelCountry.includes(placeComponents.country);
+
+          if (matchesPlaceName || (matchesCountry && (matchesState || matchesCity))) {
+            console.log('✓ Match by location text:', hotel.name, '- Location:', hotel.location, 'City:', hotel.city);
+            return true;
+          }
+
+          return false;
+        });
 
         console.log('Filtered', filtered.length, 'properties for', selectedPlace.name);
       } else {
@@ -1152,7 +1175,7 @@ const CadreagoApp = () => {
     }
 
     return filtered;
-  }, [hotels, selectedPlace, searchParams.destination, filters, sortBy]);
+  }, [hotels, selectedPlace, searchParams.destination, filters, sortBy, searchLocation]);
 
   // Check if a coordinate is within map bounds
   const isWithinBounds = (lat, lng, bounds) => {
@@ -1344,6 +1367,14 @@ const CadreagoApp = () => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && place) {
           const cityName = place.name || suggestion.description;
 
+          // Canonical search center for radius-based filtering
+          if (place.geometry?.location) {
+            setSearchLocation({
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng()
+            });
+          }
+
           setDestinationInput(cityName);
           setSearchQuery(cityName);
           setSearchParams(prev => ({ ...prev, destination: cityName }));
@@ -1524,6 +1555,9 @@ const CadreagoApp = () => {
 
                 // Only set if user hasn't typed anything yet
                 if (!destinationInput && !searchQuery) {
+                  // Canonical search center from geolocation
+                  setSearchLocation({ lat: latitude, lng: longitude });
+
                   setDestinationInput(cityName);
                   setSearchQuery(cityName);
                   setSearchParams(prev => ({ ...prev, destination: cityName }));
