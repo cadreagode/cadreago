@@ -1211,17 +1211,19 @@ const CadreagoApp = () => {
 
     // 🗺 Map-driven mode: no destination typed → show hotels in current map view
     if (!hasDestination) {
-      if (mapBounds && hotels.some(h => h.coordinates)) {
+      const base = filteredHotels;
+
+      if (mapBounds && base.some(h => h.coordinates)) {
         // If we have bounds and properties with coordinates,
         // prefer only hotels inside the visible area
-        const inBounds = hotels.filter(h =>
+        const inBounds = base.filter(h =>
           h.coordinates &&
           isWithinBounds(h.coordinates.lat, h.coordinates.lng, mapBounds)
         );
-        return inBounds.length > 0 ? inBounds : hotels;
+        return inBounds.length > 0 ? inBounds : base;
       }
       // No bounds yet → show all
-      return hotels;
+      return base;
     }
 
     // 🔍 Destination-based mode: use the full filtered logic first
@@ -2438,36 +2440,20 @@ const CadreagoApp = () => {
             </span>
           </div>
           <div className="space-y-2">
-            <div className="relative h-4 flex items-center">
-              <input
-                type="range"
-                min="0"
-                max="100000"
-                step="1000"
-                value={filters.priceRange[0]}
-                onChange={(e) => {
-                  const raw = Number(e.target.value);
-                  const max = filters.priceRange[1];
-                  const nextMin = Math.min(raw, max - 1000);
-                  setFilters({ ...filters, priceRange: [nextMin, max] });
-                }}
-                className="absolute inset-0 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
-              <input
-                type="range"
-                min="0"
-                max="100000"
-                step="1000"
-                value={filters.priceRange[1]}
-                onChange={(e) => {
-                  const raw = Number(e.target.value);
-                  const min = filters.priceRange[0];
-                  const nextMax = Math.max(raw, min + 1000);
-                  setFilters({ ...filters, priceRange: [min, nextMax] });
-                }}
-                className="absolute inset-0 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
-            </div>
+            <input
+              type="range"
+              min="0"
+              max="100000"
+              step="1000"
+              value={filters.priceRange[1]}
+              onChange={(e) => {
+                const raw = Number(e.target.value);
+                const min = filters.priceRange[0];
+                const nextMax = Math.max(raw, min + 1000);
+                setFilters({ ...filters, priceRange: [min, nextMax] });
+              }}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
             <div className="flex gap-2">
               <input
                 type="number"
