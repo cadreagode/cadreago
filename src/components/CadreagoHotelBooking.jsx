@@ -1,15 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Calendar, Users, Star, MapPin, Wifi, Car, Utensils, Waves, ThumbsUp, ThumbsDown, Heart, Menu, X, ChevronDown, Filter, CheckCircle, Shield, Coffee, Wind, Dumbbell, Sparkles, Share2, ChevronLeft, ChevronRight, User, Mail, Phone, CreditCard, FileText, Download } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { Search, Calendar, Users, Star, MapPin, Wifi, Car, Utensils, Waves, ThumbsUp, ThumbsDown, Heart, Menu, X, ChevronDown, Filter, CheckCircle, Shield, Coffee, Wind, Dumbbell, Sparkles, Share2, ChevronLeft, ChevronRight, User, Mail, Phone, CreditCard, FileText, Download, Upload, Trash2 } from 'lucide-react';
 import brandLogo from '../assets/logo.png';
 import brandIcon from '../assets/logo_icon.png';
 import brandLogoDark from '../assets/logo_non-transperant.png';
-import { fetchHotels, fetchHotelsByHost } from '../services/hotelService';
-import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus } from '../services/bookingService';
+import { fetchHotels, fetchHotelsByHost, updateHotel } from '../services/hotelService';
+import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus, checkPropertyAvailability } from '../services/bookingService';
 import { signIn, signUp, signOut, getCurrentUser, updateProfile, fetchProfileById, updateHostInfo } from '../services/authService';
 import { fetchUserPayments } from '../services/paymentService';
 import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
 import CadreagoMobileApp from './cadreagoHotelBookingMobileView';
 import GoogleMap from './GoogleMap';
+import { Button } from './ui/button';
+import HotelDetailsPage from '../pages/HotelDetails.jsx';
+import SearchResultsPage from '../pages/SearchResults.jsx';
+import BookingViewPage from '../pages/BookingView.jsx';
+import DashboardPage from '../pages/Dashboard.jsx';
+import HostOnboardingPage from '../pages/HostOnboarding.jsx';
+import HostDashboardPage from '../pages/HostDashboard.jsx';
+import HostMessagesPage from '../pages/HostMessages.jsx';
+import AdminDashboardPage from '../pages/AdminDashboard.jsx';
 
 const GST_RATE = 0.12; // 12% Goods and Services Tax applied on bookings
 const formatCurrency = (amount, currency = 'INR') => {
@@ -51,59 +61,7 @@ const INLINE_HEART_PIN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="56"
 const SAMPLE_PLACE_ID = 'ChIJN5Nz71W3j4ARhx5bwpTQEGg';
 const DEFAULT_MAP_CENTER = { lat: 20.5937, lng: 78.9629 };
 
-const initialHostProperties = [
-  {
-    id: 1,
-    name: 'Bella Vista Resort',
-    location: 'Miami, Florida',
-    stars: 3,
-    type: 'Resort',
-    rooms: 45,
-    status: 'active',
-    rating: 7.5,
-    reviews: 174,
-    basePrice: 56,
-    image: 'https://images.unsplash.com/photo-1582719508461-905c673771fd?w=400&h=300&fit=crop',
-    amenities: ['Pool', 'Spa', 'Parking', 'WiFi'],
-    totalBookings: 234,
-    monthlyRevenue: 12500,
-    occupancyRate: 78
-  },
-  {
-    id: 2,
-    name: 'Sunset Beach Villa',
-    location: 'Ibiza, Spain',
-    stars: 5,
-    type: 'Villa',
-    rooms: 12,
-    status: 'active',
-    rating: 9.2,
-    reviews: 89,
-    basePrice: 280,
-    image: 'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=400&h=300&fit=crop',
-    amenities: ['Pool', 'Beach Access', 'WiFi', 'Kitchen'],
-    totalBookings: 156,
-    monthlyRevenue: 35400,
-    occupancyRate: 92
-  },
-  {
-    id: 3,
-    name: 'Mountain View Lodge',
-    location: 'Aspen, Colorado',
-    stars: 4,
-    type: 'Lodge',
-    rooms: 28,
-    status: 'pending',
-    rating: 8.8,
-    reviews: 45,
-    basePrice: 150,
-    image: 'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&h=300&fit=crop',
-    amenities: ['Ski Access', 'Fireplace', 'Parking', 'Restaurant'],
-    totalBookings: 67,
-    monthlyRevenue: 8900,
-    occupancyRate: 65
-  }
-];
+const initialHostProperties = [];
 
 const PRICE_MARKER_BASE_STYLE = {
   display: 'inline-flex',
@@ -306,6 +264,351 @@ const DestinationSearchInput = ({
   </div>
 );
 
+// Edit Property Form Component using React Hook Form
+const EditPropertyFormWithHookForm = ({ property, onClose, onSuccess, showNotification, updateHotel }) => {
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+    defaultValues: {
+      name: property.name || '',
+      description: property.description || '',
+      type: property.property_type || property.type || '',
+      stars: property.stars || '',
+      rooms: property.total_rooms || property.rooms || '',
+      basePrice: property.base_price_per_night || property.basePrice || '',
+      offerPrice: property.offer_price_per_night || property.offerPrice || '',
+      eco_friendly: property.eco_friendly || false,
+      free_cancellation: property.free_cancellation || false,
+    }
+  });
+
+  // Separate state for location fields that need Google Places integration
+  const [locationData, setLocationData] = React.useState({
+    location: property.location || '',
+    address: property.address || '',
+    city: property.city || '',
+    country: property.country || '',
+    latitude: property.latitude || '',
+    longitude: property.longitude || '',
+  });
+
+  // Initialize location data from property (only when property.id changes)
+  React.useEffect(() => {
+    if (!property) return;
+    setLocationData({
+      location: property.location || '',
+      address: property.address || '',
+      city: property.city || '',
+      country: property.country || '',
+      latitude: property.latitude || '',
+      longitude: property.longitude || '',
+    });
+  }, [property?.id]);
+
+  const onSubmit = async (data) => {
+    // Manual validation for location
+    if (!locationData.location || locationData.location.trim() === '') {
+      showNotification('error', 'Location is required');
+      return;
+    }
+
+    const updates = {
+      name: data.name,
+      description: data.description,
+      property_type: data.type?.toLowerCase(),
+      stars: parseInt(data.stars),
+      location: locationData.location,
+      address: locationData.address,
+      city: locationData.city,
+      country: locationData.country,
+      latitude: locationData.latitude || null,
+      longitude: locationData.longitude || null,
+      total_rooms: parseInt(data.rooms),
+      base_price_per_night: parseFloat(data.basePrice),
+      offer_price_per_night: data.offerPrice ? parseFloat(data.offerPrice) : null,
+      eco_friendly: data.eco_friendly,
+      free_cancellation: data.free_cancellation,
+    };
+
+    const { error } = await updateHotel(property.id, updates);
+
+    if (error) {
+      showNotification('error', 'Failed to update property. Please try again.');
+      return;
+    }
+
+    showNotification('success', 'Property updated successfully!');
+    onSuccess(property.id, updates);
+    onClose();
+  };
+
+  // Google Places Autocomplete Setup
+  const setupGooglePlaces = (input) => {
+    if (!input || !window.google?.maps || input.dataset.autocompleteInitialized) return;
+
+    const autocomplete = new window.google.maps.places.Autocomplete(input, {
+      types: ['establishment', 'geocode'],
+      fields: ['formatted_address', 'address_components', 'geometry', 'name']
+    });
+
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+
+      if (!place.geometry) {
+        showNotification('error', 'No details available for this location');
+        return;
+      }
+
+      let street = '';
+      let city = '';
+      let country = '';
+
+      if (place.address_components) {
+        place.address_components.forEach(component => {
+          const types = component.types;
+          if (types.includes('street_number') || types.includes('route')) {
+            street += component.long_name + ' ';
+          }
+          if (types.includes('locality') || types.includes('administrative_area_level_2')) {
+            city = component.long_name;
+          }
+          if (types.includes('country')) {
+            country = component.long_name;
+          }
+        });
+      }
+
+      const lat = place.geometry.location.lat();
+      const lng = place.geometry.location.lng();
+
+      // Update locationData state (not React Hook Form)
+      setLocationData({
+        location: place.name || place.formatted_address,
+        address: street.trim() || place.formatted_address,
+        city: city,
+        country: country,
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+      });
+
+      showNotification('success', 'Address details populated!');
+    });
+
+    input.dataset.autocompleteInitialized = 'true';
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-6">
+      {/* Basic Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Basic Information</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Property Name *</label>
+            <input
+              {...register('name', { required: 'Property name is required' })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+            {errors.name && <p className="text-red-600 text-sm mt-1">{errors.name.message}</p>}
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea
+              {...register('description')}
+              rows="3"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="Brief description of your property"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Property Type *</label>
+            <select
+              {...register('type', { required: 'Property type is required' })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select type</option>
+              <option value="hotel">Hotel</option>
+              <option value="resort">Resort</option>
+              <option value="villa">Villa</option>
+              <option value="apartment">Apartment</option>
+              <option value="guesthouse">Guesthouse</option>
+            </select>
+            {errors.type && <p className="text-red-600 text-sm mt-1">{errors.type.message}</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Star Rating *</label>
+            <select
+              {...register('stars', { required: 'Star rating is required' })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select rating</option>
+              {[1, 2, 3, 4, 5].map(star => (
+                <option key={star} value={star}>{star} Star{star > 1 ? 's' : ''}</option>
+              ))}
+            </select>
+            {errors.stars && <p className="text-red-600 text-sm mt-1">{errors.stars.message}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* Location Details */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Location Details</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Search Address with Google Places
+              <span className="text-xs text-gray-500 ml-2">(Auto-fills all fields below)</span>
+            </label>
+            <input
+              type="text"
+              onFocus={(e) => setupGooglePlaces(e.target)}
+              placeholder="Start typing your property address or name..."
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Location Display Name *</label>
+            <input
+              type="text"
+              value={locationData.location}
+              onChange={(e) => setLocationData(prev => ({ ...prev, location: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g. Kovalam Beach, Kerala"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Street Address</label>
+            <input
+              type="text"
+              value={locationData.address}
+              onChange={(e) => setLocationData(prev => ({ ...prev, address: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="Street address"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+            <input
+              type="text"
+              value={locationData.city}
+              onChange={(e) => setLocationData(prev => ({ ...prev, city: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+            <input
+              type="text"
+              value={locationData.country}
+              onChange={(e) => setLocationData(prev => ({ ...prev, country: e.target.value }))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
+            <input
+              type="text"
+              value={locationData.latitude}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+              placeholder="Auto-filled from Google Places"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
+            <input
+              type="text"
+              value={locationData.longitude}
+              readOnly
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+              placeholder="Auto-filled from Google Places"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Pricing & Capacity */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Pricing & Capacity</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Total Rooms *</label>
+            <input
+              type="number"
+              {...register('rooms', { required: 'Total rooms is required', min: 1 })}
+              min="1"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+            {errors.rooms && <p className="text-red-600 text-sm mt-1">{errors.rooms.message}</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Base Price (INR/night) *</label>
+            <input
+              type="number"
+              step="0.01"
+              {...register('basePrice', { required: 'Base price is required', min: 0 })}
+              min="0"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+            {errors.basePrice && <p className="text-red-600 text-sm mt-1">{errors.basePrice.message}</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Offer Price (INR/night)</label>
+            <input
+              type="number"
+              step="0.01"
+              {...register('offerPrice', { min: 0 })}
+              min="0"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="Optional discount price"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Property Features */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Property Features</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <label className="flex items-center space-x-3">
+            <input
+              type="checkbox"
+              {...register('eco_friendly')}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Eco-Friendly Property</span>
+          </label>
+          <label className="flex items-center space-x-3">
+            <input
+              type="checkbox"
+              {...register('free_cancellation')}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="text-sm font-medium text-gray-700">Free Cancellation</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Form Actions */}
+      <div className="flex justify-end space-x-3 pt-4 border-t">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50"
+        >
+          {isSubmitting ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </form>
+  );
+};
+
 const CadreagoApp = () => {
   const [currentView, setCurrentView] = useState('search');
   const [selectedHotel, setSelectedHotel] = useState(null);
@@ -353,8 +656,28 @@ const CadreagoApp = () => {
     price: '',
     icon: DEFAULT_ADDON_ICON
   });
+  const [showEditPropertyModal, setShowEditPropertyModal] = useState(false);
+  const [editPropertyForm, setEditPropertyForm] = useState(null);
+  const [showViewPropertyModal, setShowViewPropertyModal] = useState(false);
+  const [viewPropertyData, setViewPropertyData] = useState(null);
+  const [showManageGalleryModal, setShowManageGalleryModal] = useState(false);
+  const [galleryPropertyId, setGalleryPropertyId] = useState(null);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
   const [payoutForm, setPayoutForm] = useState({ amount: '', notes: '' });
+  const [newPropertyForm, setNewPropertyForm] = useState({
+    name: '',
+    type: '',
+    location: '',
+    mapSearch: '',
+    latitude: '',
+    longitude: '',
+    rooms: '',
+    stars: '',
+    basePrice: '',
+    offerPrice: '',
+    description: '',
+    amenities: []
+  });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [mapSelectedHotel, setMapSelectedHotel] = useState(null);
   const [hoveredHotelId, setHoveredHotelId] = useState(null);
@@ -368,6 +691,41 @@ const CadreagoApp = () => {
   const googleMapRef = useRef(null); // Ref for new GoogleMap component
   const userInteractedWithMap = useRef(false); // Track if user manually moved/zoomed map
   const mapLoadedRef = useRef(false);
+
+  // Helper to keep URL in sync with selected property without reloading the page
+  const updateUrlPropertyParam = React.useCallback((propertyIdOrNull) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+
+      if (propertyIdOrNull) {
+        url.searchParams.set('propertyId', propertyIdOrNull);
+        // Backwards-compat: keep old ?property=... in sync for existing shared links
+        url.searchParams.set('property', propertyIdOrNull);
+      } else {
+        url.searchParams.delete('propertyId');
+        url.searchParams.delete('property');
+      }
+
+      window.history.pushState({}, '', url.toString());
+    } catch (err) {
+      console.error('Failed to update property in URL', err);
+    }
+  }, []);
+
+  const handleOpenProperty = React.useCallback((hotel) => {
+    if (!hotel) return;
+
+    setSelectedHotel(hotel);
+    setCurrentView('details');
+    updateUrlPropertyParam(hotel.id);
+  }, [updateUrlPropertyParam]);
+
+  const handleCloseDetails = React.useCallback(() => {
+    setSelectedHotel(null);
+    setCurrentView('search');
+    updateUrlPropertyParam(null);
+  }, [updateUrlPropertyParam]);
 
   const handleHotelMarkerClick = React.useCallback((hotel) => {
     if (!hotel) return;
@@ -409,6 +767,11 @@ const CadreagoApp = () => {
     mapLoadedRef.current = true;
     setMapError('');
   }, []);
+
+  const scrollToTop = React.useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   const searchInputRef = useRef(null);
   const searchInputRefDesktop = useRef(null);
   const destinationInputFocusedRef = useRef(false);
@@ -436,6 +799,12 @@ const CadreagoApp = () => {
   const [mapDirty, setMapDirty] = useState(false);
   const [notification, setNotification] = useState(null);
   const [radiusFilterKm, setRadiusFilterKm] = useState(null); // null = auto
+  const [bookingAvailability, setBookingAvailability] = useState({
+    status: 'idle', // 'idle' | 'checking' | 'available' | 'unavailable' | 'error'
+    message: '',
+    roomsAvailable: null
+  });
+  const [bookingDateError, setBookingDateError] = useState('');
 
   // NEW: Improved search state
   const [destinationInput, setDestinationInput] = useState('');
@@ -477,6 +846,110 @@ const CadreagoApp = () => {
       }
     }, 300); // 300ms debounce
   }, [searchParams.destination]);
+
+  // Automatically check availability whenever dates change on the booking page
+  useEffect(() => {
+    if (currentView !== 'booking' || !selectedHotel) return;
+
+    const { checkIn, checkOut } = searchParams;
+    if (!checkIn || !checkOut) {
+      setBookingDateError('');
+      setBookingAvailability(prev => ({
+        ...prev,
+        status: 'idle',
+        message: '',
+        roomsAvailable: null
+      }));
+      return;
+    }
+
+    // Disallow past check-in dates
+    if (checkIn < todayIso) {
+      setBookingDateError('Check-in date cannot be in the past.');
+      setBookingAvailability(prev => ({
+        ...prev,
+        status: 'idle',
+        message: '',
+        roomsAvailable: null
+      }));
+      return;
+    }
+
+    // Enforce check-out at least next day after check-in
+    if (checkOut <= checkIn) {
+      setBookingDateError('Check-out must be at least one day after check-in.');
+      setBookingAvailability(prev => ({
+        ...prev,
+        status: 'idle',
+        message: '',
+        roomsAvailable: null
+      }));
+      return;
+    }
+
+    const nights = calculateNights(checkIn, checkOut);
+    if (nights <= 0) {
+      setBookingDateError('Please select a valid date range.');
+      setBookingAvailability(prev => ({
+        ...prev,
+        status: 'idle',
+        message: '',
+        roomsAvailable: null
+      }));
+      return;
+    }
+
+    setBookingDateError('');
+
+    let cancelled = false;
+
+    const runAvailabilityCheck = async () => {
+      setBookingAvailability(prev => ({
+        ...prev,
+        status: 'checking',
+        message: '',
+        roomsAvailable: null
+      }));
+
+      const { isAvailable, roomsAvailable, error } = await checkPropertyAvailability(
+        selectedHotel.id,
+        checkIn,
+        checkOut,
+        1
+      );
+
+      if (cancelled) return;
+
+      if (error) {
+        setBookingAvailability({
+          status: 'error',
+          message: 'We could not check availability. Please try again.',
+          roomsAvailable: roomsAvailable ?? null
+        });
+        return;
+      }
+
+      if (!isAvailable) {
+        setBookingAvailability({
+          status: 'unavailable',
+          message: 'Not available for these dates. Please try different dates.',
+          roomsAvailable
+        });
+      } else {
+        setBookingAvailability({
+          status: 'available',
+          message: 'Good news! This stay is available for your dates.',
+          roomsAvailable
+        });
+      }
+    };
+
+    runAvailabilityCheck();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams.checkIn, searchParams.checkOut, currentView, selectedHotel]);
 
   // Use Supabase data for user bookings (loaded in loadUserData function)
   const userBookings = userBookingsData;
@@ -642,6 +1115,59 @@ const CadreagoApp = () => {
     }
   ];
 
+  const hostMessages = [
+    {
+      id: 1,
+      guestName: 'Emily Clark',
+      propertyName: 'Bella Vista Resort',
+      subject: 'Late check-in request',
+      preview: 'Hi, our flight lands at 10:30 PM. Is it okay if we check in closer to 11?',
+      date: '2025-03-28T14:30:00Z',
+      status: 'unread',
+      messages: [
+        {
+          id: 'm1',
+          sender: 'guest',
+          text: 'Hi, our flight lands at 10:30 PM. Is it okay if we check in closer to 11?',
+          timestamp: '2025-03-28T14:30:00Z'
+        },
+        {
+          id: 'm2',
+          sender: 'host',
+          text: 'Yes, that is absolutely fine. Our front desk is staffed 24/7.',
+          timestamp: '2025-03-28T15:00:00Z'
+        }
+      ]
+    },
+    {
+      id: 2,
+      guestName: 'Rahul Mehta',
+      propertyName: 'Sunset Beach Villa',
+      subject: 'Parking availability',
+      preview: 'Do you have covered parking available for one car?',
+      date: '2025-03-26T09:10:00Z',
+      status: 'read',
+      messages: [
+        {
+          id: 'm1',
+          sender: 'guest',
+          text: 'Do you have covered parking available for one car?',
+          timestamp: '2025-03-26T09:10:00Z'
+        },
+        {
+          id: 'm2',
+          sender: 'host',
+          text: 'Yes, we have one covered parking spot reserved for each villa.',
+          timestamp: '2025-03-26T09:20:00Z'
+        }
+      ]
+    }
+  ];
+
+  const unreadHostMessages = hostMessages.filter(
+    (m) => m.status === 'unread'
+  ).length;
+
   // Detect screen size
   React.useEffect(() => {
     const handleResize = () => {
@@ -685,8 +1211,46 @@ const CadreagoApp = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return '';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    if (Number.isNaN(date.getTime())) return '';
+    const day = String(date.getDate()).padStart(2, '0');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const calculateNights = (checkIn, checkOut) => {
+    if (!checkIn || !checkOut) return 0;
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime())) {
+      return 0;
+    }
+    const diffMs = checkOutDate.getTime() - checkInDate.getTime();
+    if (diffMs <= 0) return 0;
+    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+  };
+
+  const toLocalIsoDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayIso = toLocalIsoDate(new Date());
+
+  const getNextDayIso = (isoDate) => {
+    if (!isoDate) return null;
+    const parts = isoDate.split('-').map(Number);
+    if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+    const [year, month, day] = parts;
+    const d = new Date(year, month - 1, day);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setDate(d.getDate() + 1);
+    return toLocalIsoDate(d);
   };
 
   const renderAddonIcon = (icon, size = 20) => {
@@ -717,18 +1281,75 @@ const CadreagoApp = () => {
     }
   };
 
-  const calculateAddonsTotal = () => {
+  const calculateAddonsTotal = (nights = 1) => {
+    const effectiveNights = Math.max(nights, 1);
     return selectedAddons.reduce((total, addonId) => {
       const addon = availableAddons.find(a => a.id === addonId);
       if (!addon) return total;
-      const multiplier = addon.perPerson ? searchParams.adults : 1;
-      return total + (addon.price * multiplier);
+      const guestsMultiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
+      return total + addon.price * guestsMultiplier * effectiveNights;
     }, 0);
+  };
+
+  const handleBookingCheckInChange = (e) => {
+    const value = e.target.value;
+    setSearchParams(prev => {
+      let nextCheckIn = value || '';
+
+      // Do not allow past check-in dates
+      if (nextCheckIn && nextCheckIn < todayIso) {
+        nextCheckIn = todayIso;
+      }
+
+      let nextCheckOut = prev.checkOut;
+
+      // Ensure check-out is at least next day after new check-in
+      if (nextCheckIn) {
+        const minCheckout = getNextDayIso(nextCheckIn);
+        if (!nextCheckOut || (minCheckout && nextCheckOut <= nextCheckIn)) {
+          nextCheckOut = minCheckout;
+        }
+      }
+
+      return {
+        ...prev,
+        checkIn: nextCheckIn,
+        checkOut: nextCheckOut
+      };
+    });
+  };
+
+  const handleBookingCheckOutChange = (e) => {
+    const value = e.target.value;
+    setSearchParams(prev => {
+      const currentCheckIn = prev.checkIn || '';
+      let nextCheckOut = value || '';
+
+      // Do not allow past check-out dates
+      if (nextCheckOut && nextCheckOut < todayIso) {
+        nextCheckOut = todayIso;
+      }
+
+      // Enforce check-out at least one day after check-in
+      if (currentCheckIn) {
+        const minCheckout = getNextDayIso(currentCheckIn);
+        if (minCheckout && nextCheckOut && nextCheckOut <= currentCheckIn) {
+          nextCheckOut = minCheckout;
+        }
+      }
+
+      return {
+        ...prev,
+        checkOut: nextCheckOut
+      };
+    });
   };
 
   // Share property function
   const shareProperty = (hotel) => {
-    const url = `${window.location.origin}${window.location.pathname}?property=${hotel.id}&checkIn=${searchParams.checkIn}&checkOut=${searchParams.checkOut}&adults=${searchParams.adults}&children=${searchParams.children}`;
+    const basePrice = hotel.basePrice || hotel.base_price_per_night || '';
+    const offerPrice = hotel.offerPrice || hotel.offer_price_per_night || '';
+    const url = `${window.location.origin}${window.location.pathname}?propertyId=${hotel.id}&checkIn=${searchParams.checkIn}&checkOut=${searchParams.checkOut}&adults=${searchParams.adults}&children=${searchParams.children}&basePrice=${basePrice}&offerPrice=${offerPrice}&currency=${hotel.currency || 'INR'}`;
     
     if (navigator.share) {
       navigator.share({
@@ -938,6 +1559,26 @@ const CadreagoApp = () => {
     amenities: []
   });
 
+  // On initial load (and whenever hotels finish loading), open property from URL if present
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!hotels || hotels.length === 0) return;
+
+    try {
+      const url = new URL(window.location.href);
+      const propertyIdFromUrl = url.searchParams.get('propertyId') || url.searchParams.get('property');
+      if (!propertyIdFromUrl) return;
+
+      const hotel = hotels.find((h) => String(h.id) === String(propertyIdFromUrl));
+      if (hotel) {
+        setSelectedHotel(hotel);
+        setCurrentView('details');
+      }
+    } catch (err) {
+      console.error('Failed to initialize property from URL', err);
+    }
+  }, [hotels]);
+
   // Check for existing user session on mount
   useEffect(() => {
     const checkSession = async () => {
@@ -976,6 +1617,45 @@ const CadreagoApp = () => {
 
     checkSession();
   }, []);
+
+  // Keep list/details view in sync with browser back/forward buttons
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePopState = () => {
+      try {
+        const url = new URL(window.location.href);
+        const propertyIdFromUrl = url.searchParams.get('propertyId') || url.searchParams.get('property');
+
+        if (!propertyIdFromUrl) {
+          // No property in URL → ensure list view
+          setSelectedHotel(null);
+          setCurrentView('search');
+          return;
+        }
+
+        if (!hotels || hotels.length === 0) {
+          // Hotels not loaded yet; just clear selection so we don't show stale data
+          setSelectedHotel(null);
+          return;
+        }
+
+        const hotel = hotels.find((h) => String(h.id) === String(propertyIdFromUrl));
+        if (hotel) {
+          setSelectedHotel(hotel);
+          setCurrentView('details');
+        } else {
+          setSelectedHotel(null);
+          setCurrentView('search');
+        }
+      } catch (err) {
+        console.error('Failed to handle browser navigation for property view', err);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [hotels]);
 
   // Handle search button click - sync input values with search params
   const handleSearch = () => {
@@ -1041,6 +1721,28 @@ const CadreagoApp = () => {
 
     loadAllHotels();
   }, []); // Only run once on mount
+
+  // Load host properties when user is a host and logged in
+  useEffect(() => {
+    const loadHostProperties = async () => {
+      if (!user || !user.id || userType !== 'host') {
+        return;
+      }
+
+      console.log('Loading host properties for user:', user.id);
+      const { data, error } = await fetchHotelsByHost(user.id);
+
+      if (!error && data) {
+        console.log(`Loaded ${data.length} properties for host`);
+        setHostProperties(data);
+      } else {
+        console.error('Error loading host properties:', error);
+        setHostProperties([]);
+      }
+    };
+
+    loadHostProperties();
+  }, [user, userType]); // Reload when user or userType changes
 
   // Calculate distance between two coordinates (Haversine formula)
   // Add state for sorting
@@ -2039,7 +2741,16 @@ const CadreagoApp = () => {
     <header className="bg-white shadow-sm sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <div className="flex items-center cursor-pointer space-x-2" onClick={() => setCurrentView('search')}>
+          <div
+            className="flex items-center cursor-pointer space-x-2"
+            onClick={() => {
+              if (currentView === 'details') {
+                handleCloseDetails();
+              } else {
+                setCurrentView('search');
+              }
+            }}
+          >
             <img
               src={brandIcon}
               alt="Cadreago icon"
@@ -2055,28 +2766,49 @@ const CadreagoApp = () => {
           {/* Desktop Navigation (>= 360px) */}
           {!isMobile && (
             <nav className="hidden md:flex items-center space-x-8">
-              <button onClick={() => setCurrentView('search')} className="text-blue-600 hover:text-blue-700 font-medium">Hotels</button>
+              <button
+                onClick={() => {
+                  if (currentView === 'details') {
+                    handleCloseDetails();
+                  } else {
+                    setCurrentView('search');
+                  }
+                }}
+                className="text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Hotels
+              </button>
               
               {isLoggedIn ? (
                 <>
                   <button 
-                    onClick={() => setCurrentView(userType === 'host' ? 'host-dashboard' : 'dashboard')} 
+                    onClick={() => {
+                      setCurrentView(userType === 'host' ? 'host-dashboard' : 'dashboard');
+                      scrollToTop();
+                    }} 
                     className="text-blue-600 hover:text-blue-700 font-medium"
                   >
                     {userType === 'host' ? 'Host Dashboard' : 'Dashboard'}
                   </button>
+                  {userType === 'host' && (
+                    <button
+                      onClick={() => {
+                        setCurrentView('host-messages');
+                        scrollToTop();
+                      }}
+                      className="relative text-blue-600 hover:text-blue-700 font-medium"
+                    >
+                      Messages
+                      {unreadHostMessages > 0 && (
+                        <span className="absolute -top-1 -right-3 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
+                          {unreadHostMessages}
+                        </span>
+                      )}
+                    </button>
+                  )}
                   {userType === 'guest' && (
                     <button className="text-blue-600 hover:text-blue-700 font-medium">Favorites</button>
                   )}
-                  {userType === 'host' && (
-                    <button 
-                      onClick={() => setShowAddPropertyModal(true)}
-                      className="text-blue-600 hover:text-blue-700 font-medium"
-                    >
-                      Add Property
-                    </button>
-                  )}
-                  <button className="text-blue-600 hover:text-blue-700 font-medium">Help</button>
                   <div className="flex items-center space-x-3">
                     <span className="text-gray-700 text-sm">{user?.name}</span>
                     <div 
@@ -2142,7 +2874,11 @@ const CadreagoApp = () => {
           <div className="px-4 py-3 space-y-3">
             <button 
               onClick={() => {
-                setCurrentView('search');
+                if (currentView === 'details') {
+                  handleCloseDetails();
+                } else {
+                  setCurrentView('search');
+                }
                 setMobileMenuOpen(false);
               }} 
               className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
@@ -2155,37 +2891,25 @@ const CadreagoApp = () => {
                 <button 
                   onClick={() => {
                     setCurrentView(userType === 'host' ? 'host-dashboard' : 'dashboard');
+                    scrollToTop();
                     setMobileMenuOpen(false);
                   }}
                   className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   📊 {userType === 'host' ? 'Host Dashboard' : 'Dashboard'}
                 </button>
-                {userType === 'guest' && (
-                  <button 
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
-                  >
-                    ❤️ Favorites
-                  </button>
-                )}
                 {userType === 'host' && (
                   <button 
                     onClick={() => {
-                      setShowAddPropertyModal(true);
+                      setCurrentView('host-messages');
+                      scrollToTop();
                       setMobileMenuOpen(false);
                     }}
                     className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
                   >
-                    ➕ Add Property
+                    💬 Messages
                   </button>
                 )}
-                <button 
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="block w-full text-left px-4 py-3 text-blue-600 font-medium hover:bg-blue-50 rounded-lg transition-colors"
-                >
-                  ❓ Help
-                </button>
                 <div className="pt-3 border-t flex items-center justify-between px-4">
                   <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold">
@@ -2308,10 +3032,12 @@ const CadreagoApp = () => {
           
           {/* Search Box */}
           <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 max-w-5xl mx-auto">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="flex flex-col md:flex-row md:items-end gap-4">
               {/* Destination */}
-              <div>
-                <label className="block text-left text-sm font-medium text-gray-700 mb-2">Destination</label>
+              <div className="flex-1 min-w-[220px]">
+                <label className="block text-left text-sm font-medium text-gray-700 mb-2">
+                  Destination
+                </label>
                 <DestinationSearchInput
                   inputRef={searchInputRefDesktop}
                   value={destinationInput}
@@ -2325,38 +3051,48 @@ const CadreagoApp = () => {
                 />
               </div>
 
-              {/* Check-in */}
-              <div>
-                <label className="block text-left text-sm font-medium text-gray-700 mb-2">Check in</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={20} />
-                  <input 
-                    type="date"
-                    value={searchParams.checkIn}
-                    onChange={(e) => setSearchParams({...searchParams, checkIn: e.target.value})}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
-                  />
-                </div>
-              </div>
-
-              {/* Check-out */}
-              <div>
-                <label className="block text-left text-sm font-medium text-gray-700 mb-2">Check out</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={20} />
-                  <input 
-                    type="date"
-                    value={searchParams.checkOut}
-                    onChange={(e) => setSearchParams({...searchParams, checkOut: e.target.value})}
-                    min={searchParams.checkIn}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
-                  />
+              {/* Dates (check-in & check-out combined) */}
+              <div className="w-full md:w-64">
+                <label className="block text-left text-sm font-medium text-gray-700 mb-2">
+                  Dates
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    <input
+                      type="date"
+                      value={searchParams.checkIn}
+                      min={todayIso}
+                      onChange={(e) =>
+                        setSearchParams({ ...searchParams, checkIn: e.target.value })
+                      }
+                      className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-700"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    <input
+                      type="date"
+                      value={searchParams.checkOut}
+                      onChange={(e) =>
+                        setSearchParams({ ...searchParams, checkOut: e.target.value })
+                      }
+                      min={
+                        searchParams.checkIn
+                          ? getNextDayIso(searchParams.checkIn)
+                          : getNextDayIso(todayIso)
+                      }
+                      className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-700"
+                    />
+                  </div>
                 </div>
               </div>
 
               {/* Guests */}
-              <div>
-                <label className="block text-left text-sm font-medium text-gray-700 mb-2">Guests</label>
+              <div className="w-full md:w-48">
+                <label className="block text-left text-sm font-medium text-gray-700 mb-2">
+                  Guests
+                </label>
                 <div className="relative">
                   <Users className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={20} />
                   <button
@@ -2368,17 +3104,20 @@ const CadreagoApp = () => {
                   </button>
                 </div>
               </div>
-            </div>
 
-            <button
-              onClick={() => {
-                handleSearch();
-                setCurrentView('search');
-              }}
-              className="w-full md:w-auto px-12 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-lg shadow-lg"
-            >
-              Search
-            </button>
+              {/* Search button */}
+              <div className="w-full md:w-auto">
+                <button
+                  onClick={() => {
+                    handleSearch();
+                    setCurrentView('search');
+                  }}
+                  className="w-full md:h-[52px] px-10 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-base md:text-lg shadow-lg"
+                >
+                  Search
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2430,9 +3169,9 @@ const CadreagoApp = () => {
         <Filter size={18} className="text-blue-600" />
         <h3 className="text-sm font-semibold text-gray-800">Filters</h3>
       </div>
-      <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+      <div className="flex flex-col gap-4 flex-1">
         {/* Price Range Slider */}
-        <div className="flex-1 min-w-[200px] max-w-md">
+        <div className="w-full">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-gray-700">Price Range</span>
             <span className="text-xs text-gray-600">
@@ -2474,66 +3213,79 @@ const CadreagoApp = () => {
         </div>
 
         {/* Rating filter */}
-        <select
-          value={filters.rating}
-          onChange={(e) => setFilters({...filters, rating: e.target.value})}
-          className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="all">Any rating</option>
-          <option value="9">9+ Wonderful</option>
-          <option value="8">8+ Very good</option>
-          <option value="7">7+ Good</option>
-          <option value="6">6+ Pleasant</option>
-        </select>
+        <div className="w-full">
+          <label className="block text-xs font-medium text-gray-700 mb-2">Rating</label>
+          <select
+            value={filters.rating}
+            onChange={(e) => setFilters({...filters, rating: e.target.value})}
+            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">Any rating</option>
+            <option value="9">9+ Wonderful</option>
+            <option value="8">8+ Very good</option>
+            <option value="7">7+ Good</option>
+            <option value="6">6+ Pleasant</option>
+          </select>
+        </div>
 
         {/* Type filter */}
-        <select
-          value={filters.type}
-          onChange={(e) => setFilters({...filters, type: e.target.value})}
-          className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="all">All stays</option>
-          <option value="hotels">Hotels</option>
-          <option value="resorts">Resorts</option>
-          <option value="guesthouses">Guesthouses</option>
-          <option value="farmstays">Farm stays</option>
-          <option value="apartments">Apartments</option>
-        </select>
+        <div className="w-full">
+          <label className="block text-xs font-medium text-gray-700 mb-2">Property Type</label>
+          <select
+            value={filters.type}
+            onChange={(e) => setFilters({...filters, type: e.target.value})}
+            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All stays</option>
+            <option value="hotels">Hotels</option>
+            <option value="resorts">Resorts</option>
+            <option value="guesthouses">Guesthouses</option>
+            <option value="farmstays">Farm stays</option>
+            <option value="apartments">Apartments</option>
+          </select>
+        </div>
 
         {/* Radius filter */}
-        <div className="flex-1 md:flex-none">
+        <div className="w-full">
           <div className="space-y-2">
             <div className="text-xs font-medium text-slate-600">Search radius</div>
             <div className="flex flex-wrap gap-2">
               {RADIUS_OPTIONS.map((opt) => {
                 const isActive = radiusFilterKm === opt.value;
                 return (
-                  <button
+                  <Button
                     key={opt.label}
                     type="button"
+                    size="sm"
+                    variant={isActive ? 'default' : 'outline'}
                     onClick={() => setRadiusFilterKm(opt.value)}
                     className={
-                      'rounded-full px-3 py-1 text-xs border ' +
+                      'rounded-full px-3 py-1 text-xs ' +
                       (isActive
-                        ? 'bg-sky-600 text-white border-sky-600'
-                        : 'bg-white text-slate-700 border-slate-300')
+                        ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
                     }
                   >
                     {opt.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowMoreFilters(!showMoreFilters)}
-          className="px-4 py-2 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
-        >
-          {showMoreFilters ? 'Hide filters' : 'More filters'}
-        </button>
+        {/* More filters button - centered */}
+        <div className="w-full flex justify-center">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setShowMoreFilters(!showMoreFilters)}
+            className="px-6 py-2 text-sm text-blue-600 border-blue-200 hover:bg-blue-50"
+          >
+            {showMoreFilters ? 'Hide filters' : 'More filters'}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -2552,14 +3304,12 @@ const CadreagoApp = () => {
   const HotelCard = ({ hotel }) => {
     // Calculate stars based on rating (0-10 scale converted to 0-5 stars)
     const starCount = hotel.stars || Math.min(5, Math.round((hotel.rating || 0) / 2));
+    const showOffer = hotel.hasOffer && hotel.basePrice && hotel.price && hotel.price < hotel.basePrice;
 
     return (
     <div
       className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow cursor-pointer"
-      onClick={() => {
-        setSelectedHotel(hotel);
-        setCurrentView('details');
-      }}
+      onClick={() => handleOpenProperty(hotel)}
       onMouseEnter={() => setHoveredHotelId(hotel.id)}
       onMouseLeave={() => setHoveredHotelId(null)}
     >
@@ -2671,15 +3421,26 @@ const CadreagoApp = () => {
               </div>
 
               <div className="text-right">
-                <div className="text-xl md:text-2xl font-bold text-gray-900 mb-0.5">{formatCurrency(hotel.price, hotel.currency)}</div>
-                <div className="text-xs text-gray-600 mb-2">
-                  {getGuestText()}
+                <div className="mb-0.5">
+                  {showOffer && (
+                    <div className="text-xs text-gray-400 line-through">
+                      {formatCurrency(hotel.basePrice, hotel.currency)}
+                    </div>
+                  )}
+                  <div className={`text-xl md:text-2xl font-bold ${showOffer ? 'text-green-600' : 'text-gray-900'}`}>
+                    {formatCurrency(hotel.price, hotel.currency)}
+                  </div>
+                  {showOffer && (
+                    <div className="text-[11px] text-red-600 font-semibold">
+                      Limited time offer
+                    </div>
+                  )}
                 </div>
+                <div className="text-xs text-gray-600 mb-2">{getGuestText()}</div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedHotel(hotel);
-                    setCurrentView('details');
+                    handleOpenProperty(hotel);
                   }}
                   className="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-sm shadow-md"
                 >
@@ -2738,7 +3499,7 @@ const CadreagoApp = () => {
                 <input 
                   type="date"
                   value={searchParams.checkIn}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={todayIso}
                   onChange={(e) => setSearchParams({...searchParams, checkIn: e.target.value})}
                   className="w-full pl-3 pr-3 md:pl-4 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
                 />
@@ -2752,7 +3513,7 @@ const CadreagoApp = () => {
                 <input
                   type="date"
                   value={searchParams.checkOut}
-                  min={searchParams.checkIn ? new Date(new Date(searchParams.checkIn).setDate(new Date(searchParams.checkIn).getDate() + 1)).toISOString().split('T')[0] : new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0]}
+                  min={searchParams.checkIn ? getNextDayIso(searchParams.checkIn) : getNextDayIso(todayIso)}
                   onChange={(e) => setSearchParams({...searchParams, checkOut: e.target.value})}
                   className="w-full pl-3 pr-3 md:pl-4 md:pr-4 py-2.5 md:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
                 />
@@ -2885,7 +3646,7 @@ const CadreagoApp = () => {
 
           {/* Map */}
               <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-md p-4 lg:sticky lg:top-24">
+            <div className="bg-white rounded-lg shadow-md p-4 lg:sticky lg:top-20 lg:self-start">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-semibold text-gray-900">Map view</h3>
@@ -2893,11 +3654,11 @@ const CadreagoApp = () => {
                 </div>
               </div>
 
-              {/* Map container - floats with scroll */}
+              {/* Map container - sticky with viewport height */}
               <div
                 id="cadreago-map-section"
                 className="relative rounded-2xl overflow-hidden"
-                style={{ height: '560px' }}
+                style={{ height: 'calc(100vh - 180px)', maxHeight: '600px', minHeight: '400px' }}
               >
                 {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
@@ -2931,7 +3692,7 @@ const CadreagoApp = () => {
 
                 <GoogleMap
                   ref={googleMapRef}
-                  height="560px"
+                  height="100%"
                   mapId={process.env.REACT_APP_GOOGLE_MAPS_MAP_ID}
                   hotels={displayedHotels}
                   onHotelClick={handleHotelMarkerClick}
@@ -2976,13 +3737,21 @@ const CadreagoApp = () => {
                       </p>
                       <p className="text-sm text-gray-600 mb-3 line-clamp-2">{activeMapHotel.description}</p>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xl font-bold text-gray-900 flex-shrink-0">{formatCurrency(activeMapHotel.price, activeMapHotel.currency)}</span>
+                        <div className="flex flex-col items-start">
+                          {activeMapHotel.hasOffer && activeMapHotel.basePrice && activeMapHotel.price < activeMapHotel.basePrice && (
+                            <span className="text-xs text-gray-400 line-through">
+                              {formatCurrency(activeMapHotel.basePrice, activeMapHotel.currency)}
+                            </span>
+                          )}
+                          <span className={`text-xl font-bold flex-shrink-0 ${activeMapHotel.hasOffer ? 'text-green-600' : 'text-gray-900'}`}>
+                            {formatCurrency(activeMapHotel.price, activeMapHotel.currency)}
+                          </span>
+                        </div>
                         <button
                           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold flex-shrink-0"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedHotel(activeMapHotel);
-                            setCurrentView('details');
+                            handleOpenProperty(activeMapHotel);
                           }}
                         >
                           View & Book
@@ -3000,335 +3769,41 @@ const CadreagoApp = () => {
   );
   };
 
-  // Hotel Details
-  const HotelDetails = () => {
-    if (!selectedHotel) return null;
-    const nightlyRate = selectedHotel.price;
-    const currency = selectedHotel.currency || 'INR';
-    const addonOptions = (selectedHotel.addons && selectedHotel.addons.length > 0 ? selectedHotel.addons : availableAddons).map(addon => ({
-      ...addon,
-      addonPrice: addon.price || 0,
-      addonCurrency: addon.currency || currency
-    }));
-    const policyDetails = selectedHotel.policyDetails || [
-      { title: 'Check-in', description: '3:00 PM onwards with express digital check-in' },
-      { title: 'Check-out', description: '11:00 AM - late checkout available on request' },
-      { title: 'Cancellation', description: selectedHotel.freeCancellation ? 'Free cancellation up to 72 hours before arrival' : 'Cancellation charges may apply' },
-      { title: 'Security deposit', description: 'A refundable security deposit of $150 is collected at check-in' },
-      { title: 'ID verification', description: 'Government issued ID is required during check-in for all adult guests' }
-    ];
-
-    return (
-      <div className="bg-gray-50 min-h-screen">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Breadcrumb */}
-          <div className="flex items-center space-x-2 text-sm text-gray-600 mb-6">
-            <button onClick={() => setCurrentView('search')} className="hover:text-blue-600">Home</button>
-            <span>›</span>
-            <button onClick={() => setCurrentView('search')} className="hover:text-blue-600">Search results</button>
-            <span>›</span>
-            <span className="text-gray-800 font-semibold">{selectedHotel.name}</span>
-          </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-start mb-4 md:mb-6 gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">{selectedHotel.name}</h1>
-              <div className="flex items-center space-x-1 mb-2">
-                {[...Array(selectedHotel.stars)].map((_, i) => (
-                  <Star key={i} size={16} fill="#000" color="#000" />
-                ))}
-              </div>
-              <p className="text-sm md:text-base text-gray-600">{selectedHotel.address}</p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  const url = `${window.location.origin}${window.location.pathname}?property=${selectedHotel.id}&checkIn=${searchParams.checkIn}&checkOut=${searchParams.checkOut}&guests=${searchParams.adults + searchParams.children}`;
-                  setShareUrl(url);
-                  setShowShareModal(true);
-                }}
-                className="p-2 md:p-3 rounded-full hover:bg-gray-100 transition-colors"
-                title="Share property"
-              >
-                <Share2 size={24} color="#6b7280" />
-              </button>
-              <button
-                onClick={() => toggleFavorite(selectedHotel.id)}
-                className="p-2 md:p-3 rounded-full hover:bg-gray-100 transition-colors"
-                title="Add to favorites"
-              >
-                <Heart
-                  size={24}
-                  fill={favorites.includes(selectedHotel.id) ? '#ef4444' : 'none'}
-                  color={favorites.includes(selectedHotel.id) ? '#ef4444' : '#6b7280'}
-                />
-              </button>
-            </div>
-          </div>
-
-          {/* Image Gallery */}
-          {selectedHotel.images && selectedHotel.images.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6 md:mb-8">
-              {selectedHotel.images.map((img, idx) => (
-                <div
-                  key={idx}
-                  className={`${idx === 0 ? 'col-span-2 row-span-2' : ''} cursor-pointer overflow-hidden rounded-lg group`}
-                  onClick={() => {
-                    setCurrentImageIndex(idx);
-                    setShowImageGallery(true);
-                  }}
-                >
-                  <img
-                    src={img}
-                    alt={`${selectedHotel.name} ${idx + 1}`}
-                    className="w-full h-full object-cover rounded-lg transition-transform duration-300 group-hover:scale-110"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-            {/* Main Content */}
-            <div className="lg:col-span-2 bg-white rounded-lg p-4 md:p-6 lg:p-8 space-y-10">
-              <section>
-                <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3 md:mb-4">Description</h2>
-                <p className="text-sm md:text-base text-gray-700 leading-relaxed mb-4 md:mb-6">
-                  {selectedHotel.description}
-                </p>
-                <p className="text-sm md:text-base text-gray-600 leading-relaxed">
-                  Discover curated experiences and thoughtful touches designed to make every stay memorable. Enjoy premium linens, 24/7 concierge support, and seamless digital check-in for stress-free arrivals.
-                </p>
-              </section>
-
-              {selectedHotel.services && Object.keys(selectedHotel.services).length > 0 && (
-                <section>
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4 md:mb-6">Services</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                    {Object.entries(selectedHotel.services).map(([key, value]) =>
-                      value && (
-                        <div key={key} className="flex items-center space-x-2 md:space-x-3">
-                          <CheckCircle className="text-green-500 flex-shrink-0" size={20} />
-                          <span className="text-sm md:text-base text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </section>
-              )}
-
-              <section>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-900">Add-ons & Services</h2>
-                  <span className="text-sm text-blue-600">Customize your stay with host curated extras</span>
-                </div>
-                <div className="space-y-4">
-                  {addonOptions.map(addon => (
-                    <div key={addon.id} className="border rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <div className="flex items-start space-x-4">
-                        <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 text-xl">
-                          {renderAddonIcon(addon.icon)}
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{addon.name}</h3>
-                          <p className="text-sm text-gray-600">{addon.description}</p>
-                        </div>
-                      </div>
-                      <div className="text-right sm:text-right w-full sm:w-auto">
-                        {addon.addonPrice > 0 ? (
-                          <>
-                            <p className="text-xl font-bold text-gray-900">{formatCurrency(addon.addonPrice, addon.addonCurrency)}</p>
-                            <p className="text-xs text-gray-500">
-                              {addon.perPerson ? 'per guest' : 'per stay'}
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm text-gray-500">Included</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 md:mb-6 gap-3">
-                  <h2 className="text-xl md:text-2xl font-bold text-gray-900">Comments and ratings</h2>
-                  <div className={`px-3 md:px-4 py-1.5 md:py-2 ${getRatingColor(selectedHotel.rating)} text-white rounded-lg font-bold text-lg md:text-xl`}>
-                    {selectedHotel.rating}
-                  </div>
-                </div>
-
-                <div className="mb-4 md:mb-6">
-                  <div className="text-base md:text-lg font-semibold mb-2">{selectedHotel.ratingText}</div>
-                  <div className="text-xs md:text-sm text-gray-600">{selectedHotel.reviews || 0} ratings</div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">
-                  {selectedHotel.reviewScores && Object.entries(selectedHotel.reviewScores).map(([key, score]) => (
-                    <div key={key}>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs md:text-sm text-gray-700 capitalize font-medium">{key}</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2 md:h-2.5">
-                        <div
-                          className="bg-blue-600 h-2 md:h-2.5 rounded-full transition-all"
-                          style={{ width: getRatingBarWidth(score) }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {selectedHotel.userReviews && selectedHotel.userReviews.length > 0 && (
-                  <div className="space-y-4 md:space-y-6">
-                    {selectedHotel.userReviews.map(review => (
-                      <div key={review.id} className="border-b pb-4 md:pb-6">
-                        <div className="flex items-start space-x-3 md:space-x-4 mb-3 md:mb-4">
-                          <img 
-                            src={review.avatar} 
-                            alt={review.name}
-                            className="w-10 h-10 md:w-14 md:h-14 rounded-full flex-shrink-0"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                              <h4 className="font-semibold text-gray-900 text-sm md:text-lg truncate">{review.name}</h4>
-                              <div className={`px-2 md:px-3 py-1 ${getRatingColor(review.rating)} text-white rounded-lg font-bold text-sm shrink-0`}>
-                                {review.rating}
-                              </div>
-                            </div>
-                            <div className="text-xs md:text-sm text-gray-500">{review.date}</div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 md:space-y-3 ml-0 sm:ml-14 md:ml-18">
-                          <div className="flex items-start space-x-2 md:space-x-3">
-                            <ThumbsUp size={16} className="text-green-600 mt-0.5 md:mt-1 flex-shrink-0" />
-                            <p className="text-xs md:text-sm text-gray-700">{review.positive}</p>
-                          </div>
-                          <div className="flex items-start space-x-2 md:space-x-3">
-                            <ThumbsDown size={16} className="text-red-600 mt-0.5 md:mt-1 flex-shrink-0" />
-                            <p className="text-xs md:text-sm text-gray-700">{review.negative}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section>
-                <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-4">Property policy</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {policyDetails.map((policy, idx) => (
-                    <div key={idx} className="border border-gray-200 rounded-lg p-4">
-                      <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-2">{policy.title}</h3>
-                      <p className="text-sm text-gray-700 leading-relaxed">{policy.description}</p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            {/* Sidebar */}
-            <div className="lg:col-span-1 order-first lg:order-last">
-              <div className="space-y-4 lg:sticky lg:top-24">
-                {/* Price Card */}
-                <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
-                  <div className="border-t pt-4 md:pt-6">
-                    <div className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 mb-2">
-                      {formatCurrency(nightlyRate, currency)}
-                    </div>
-                    <div className="text-xs md:text-sm text-gray-600 mb-4">per night (approx.)</div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setShowPaymentForm(false);
-                      setCurrentView('booking');
-                    }}
-                    className="w-full px-4 md:px-6 py-3 md:py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-base md:text-lg shadow-md"
-                  >
-                    Book Now
-                    </button>
-                    <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout • Taxes calculated at payment</p>
-                  </div>
-
-                {/* Host Card */}
-                {selectedHotel.host && (
-                  <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4">Hosted by</h3>
-                    <div className="flex items-start space-x-4 mb-4">
-                      <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
-                        {selectedHotel.host.avatar}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <h4 className="font-bold text-gray-900">{selectedHotel.host.name}</h4>
-                          {selectedHotel.host.verified && (
-                            <CheckCircle size={16} className="text-blue-600" />
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600">Member since {selectedHotel.host.memberSince}</p>
-                        <p className="text-sm text-gray-600">{selectedHotel.host.properties} {selectedHotel.host.properties === 1 ? 'property' : 'properties'}</p>
-                      </div>
-                    </div>
-
-                    <p className="text-sm text-gray-600 mb-4">{selectedHotel.host.bio || 'Trusted superhost on Cadreago'}</p>
-
-                    <div className="space-y-3">
-                      <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-900">
-                        <p className="font-semibold mb-1">Contact host</p>
-                        <p>
-                          {isLoggedIn
-                            ? 'Have a question before booking? Send a quick message and we will connect you with the host.'
-                            : 'Login to ask questions or send a message to the host before booking.'}
-                        </p>
-                      </div>
-                      {isLoggedIn ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowMessageHostModal(true)}
-                          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-                        >
-                          Message Host
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPreferredUserType('guest');
-                            setAuthMode('login');
-                            setShowAuthModal(true);
-                          }}
-                          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-                        >
-                          Login to Contact Host
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-                </div>
-              </div>
-            </div>
-        </div>
-      </div>
-    );
-  };
+  // Hotel Details moved to src/pages/HotelDetails.jsx
 
   // Booking View
   const BookingView = () => {
     if (!selectedHotel) return null;
-    const nightlyRate = selectedHotel.price;
+    const baseNightlyRate = selectedHotel.basePrice || selectedHotel.price || 0;
+    const offerNightlyRate =
+      selectedHotel.hasOffer && selectedHotel.offerPrice && selectedHotel.offerPrice < baseNightlyRate
+        ? selectedHotel.offerPrice
+        : null;
+    const nightlyRate = offerNightlyRate || baseNightlyRate;
     const currency = selectedHotel.currency || 'INR';
-    const addonsTotal = calculateAddonsTotal();
-    const subtotal = nightlyRate + addonsTotal;
+    const nights = calculateNights(searchParams.checkIn, searchParams.checkOut);
+    const safeNights = nights > 0 ? nights : 1;
+    const totalGuests = (searchParams.adults || 0) + (searchParams.children || 0);
+    const roomBaseAmount = nightlyRate * safeNights;
+    const addonsTotal = calculateAddonsTotal(safeNights);
+    const subtotal = roomBaseAmount + addonsTotal;
     const gstAmount = Math.round(subtotal * GST_RATE);
     const bookingTotal = subtotal + gstAmount;
     const selectedAddonDetails = availableAddons.filter(addon => selectedAddons.includes(addon.id));
+    const bookingDisabled =
+      !!bookingDateError || bookingAvailability.status === 'unavailable';
+
     const handleBookingSubmit = (e) => {
       e.preventDefault();
+      if (bookingDisabled) {
+        if (bookingDateError) {
+          showNotification('error', bookingDateError);
+        } else if (bookingAvailability.status === 'unavailable') {
+          showNotification('error', 'This stay is not available for the selected dates.');
+        }
+        return;
+      }
+
       setShowPaymentForm(true);
       setTimeout(() => {
         const section = document.getElementById('payment-section');
@@ -3345,6 +3820,79 @@ const CadreagoApp = () => {
     return (
       <div className="bg-gray-50 min-h-screen">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Your stay details</h2>
+                <p className="text-sm text-gray-500">
+                  Charges may vary based on dates and add-ons.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Check-in</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    <input
+                      type="date"
+                      value={searchParams.checkIn}
+                      onChange={handleBookingCheckInChange}
+                      min={todayIso}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-700"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Check-out</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    <input
+                      type="date"
+                      value={searchParams.checkOut}
+                      onChange={handleBookingCheckOutChange}
+                      min={searchParams.checkIn ? getNextDayIso(searchParams.checkIn) : getNextDayIso(todayIso)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-700"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Guests</label>
+                  <div className="relative">
+                    <Users className="absolute left-3 top-3.5 text-gray-400 pointer-events-none" size={18} />
+                    <button
+                      type="button"
+                      onClick={() => setShowGuestSelector(true)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-left text-gray-700 hover:border-blue-400 transition-colors"
+                    >
+                      {getGuestText()}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {bookingDateError && (
+              <p className="mt-3 text-sm text-red-600">{bookingDateError}</p>
+            )}
+            {!bookingDateError && bookingAvailability.status === 'unavailable' && (
+              <p className="mt-3 text-sm text-red-600">
+                Not available for these dates. Please try different dates.
+              </p>
+            )}
+            {!bookingDateError && bookingAvailability.status === 'available' && (
+              <p className="mt-3 text-sm text-emerald-700">
+                {bookingAvailability.message}
+              </p>
+            )}
+            {bookingAvailability.status === 'checking' && (
+              <p className="mt-3 text-sm text-gray-500">Checking availability…</p>
+            )}
+            {bookingAvailability.status === 'error' && !bookingDateError && (
+              <p className="mt-3 text-sm text-amber-600">
+                We could not verify availability right now. Please try again.
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Left Sidebar */}
             <div className="space-y-4">
@@ -3388,8 +3936,15 @@ const CadreagoApp = () => {
                   </div>
 
                   <div>
+                    <div className="text-sm font-semibold text-gray-700 mb-1">Nights:</div>
+                    <div className="text-gray-900">
+                      {nights > 0 ? `${nights} night${nights > 1 ? 's' : ''}` : 'Select valid dates'}
+                    </div>
+                  </div>
+
+                  <div>
                     <div className="text-sm font-semibold text-gray-700 mb-1">Room:</div>
-                    <div className="text-gray-900">Premium room with views</div>
+                    <div className="text-gray-900">{selectedHotel.roomType || 'Premium room with views'}</div>
                   </div>
                 </div>
               </div>
@@ -3479,7 +4034,6 @@ const CadreagoApp = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {availableAddons.map(addon => {
                         const isSelected = selectedAddons.includes(addon.id);
-                        const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
                         const addonUnitPrice = addon.price;
                         return (
                           <label
@@ -3507,11 +4061,13 @@ const CadreagoApp = () => {
                                 </div>
                                 <div className="text-blue-600 font-semibold text-right">
                                   {formatCurrency(addonUnitPrice, currency)}
-                                  {addon.perPerson ? <span className="text-xs text-gray-500"> / guest</span> : ''}
+                                  {addon.perPerson ? <span className="text-xs text-gray-500"> / guest / night</span> : <span className="text-xs text-gray-500"> / stay</span>}
                                 </div>
                               </div>
                               <p className="text-xs text-gray-500 mt-1">
-                                {addon.perPerson ? `Charged per adult (${multiplier})` : 'Charged once per stay'}
+                                {addon.perPerson
+                                  ? 'Automatically applied for each adult and night'
+                                  : 'Charged once per stay, regardless of nights'}
                               </p>
                             </div>
                           </label>
@@ -3525,16 +4081,20 @@ const CadreagoApp = () => {
                       <h4 className="font-semibold text-blue-900 mb-2">Selected add-ons</h4>
                       <div className="space-y-2">
                         {selectedAddonDetails.map(addon => {
-                          const multiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
+                          const guestsMultiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
                           const addonUnitPrice = addon.price;
-                          const addonPrice = addonUnitPrice * multiplier;
+                          const addonPrice = addonUnitPrice * guestsMultiplier * safeNights;
                           return (
                             <div key={addon.id} className="flex items-center justify-between text-sm text-blue-900">
                               <div className="flex items-center gap-2">
                                 <div className="w-8 h-8 rounded-full bg-white text-blue-600 flex items-center justify-center">
                                   {renderAddonIcon(addon.icon, 16)}
                                 </div>
-                                <span>{addon.name}{addon.perPerson ? ` x${multiplier}` : ''}</span>
+                                <span>
+                                  {addon.name}
+                                  {addon.perPerson ? ` x${guestsMultiplier}` : ''}
+                                  {safeNights > 1 ? ` · ${safeNights} night${safeNights > 1 ? 's' : ''}` : ''}
+                                </span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold">+{formatCurrency(addonPrice, currency)}</span>
@@ -3555,9 +4115,34 @@ const CadreagoApp = () => {
 
                   <div className="pt-6 border-t space-y-3">
                     <div className="flex justify-between text-sm text-gray-600">
-                      <span>Room rate</span>
-                      <span className="font-semibold text-gray-900">{formatCurrency(nightlyRate, currency)}</span>
+                      <span>Stay length</span>
+                      <span className="font-semibold text-gray-900">
+                        {nights > 0 ? `${nights} night${nights > 1 ? 's' : ''}` : 'Select valid dates'}
+                      </span>
                     </div>
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Guests</span>
+                      <span className="font-semibold text-gray-900">{getGuestText()}</span>
+                    </div>
+                    {offerNightlyRate ? (
+                      <>
+                        <div className="flex justify-between text-sm text-gray-500 line-through">
+                          <span>Original price</span>
+                          <span>{formatCurrency(baseNightlyRate * safeNights, currency)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-green-700">
+                          <span>Offer price</span>
+                          <span className="font-semibold">{formatCurrency(roomBaseAmount, currency)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>Base price</span>
+                        <span className="font-semibold text-gray-900">
+                          {formatCurrency(roomBaseAmount, currency)}
+                        </span>
+                      </div>
+                    )}
                     {addonsTotal > 0 && (
                       <div className="flex justify-between text-sm text-blue-700">
                         <span>Add-ons</span>
@@ -3577,6 +4162,7 @@ const CadreagoApp = () => {
                         <span className="text-xl font-semibold">Total:</span>
                         <p className="text-sm text-gray-500">
                           Includes taxes and {selectedAddonDetails.length > 0 ? 'selected add-ons' : 'standard inclusions'}
+                          . Different dates may show different prices.
                         </p>
                       </div>
                       <span className="text-4xl font-bold text-blue-600">{formatCurrency(bookingTotal, currency)}</span>
@@ -3584,7 +4170,12 @@ const CadreagoApp = () => {
 
                     <button 
                       type="submit"
-                      className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-lg shadow-lg"
+                      disabled={bookingDisabled}
+                      className={`w-full px-6 py-4 rounded-lg transition-colors font-semibold text-lg shadow-lg ${
+                        bookingDisabled
+                          ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
                     >
                       Complete Booking
                     </button>
@@ -4838,13 +5429,31 @@ const CadreagoApp = () => {
                           </div>
 
                           <div className="flex flex-wrap gap-2">
-                            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold">
+                            <button
+                              onClick={() => {
+                                setEditPropertyForm(property);
+                                setShowEditPropertyModal(true);
+                              }}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold"
+                            >
                               Edit Property
                             </button>
-                            <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold">
+                            <button
+                              onClick={() => {
+                                setViewPropertyData(property);
+                                setShowViewPropertyModal(true);
+                              }}
+                              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold"
+                            >
                               View Property
                             </button>
-                            <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold">
+                            <button
+                              onClick={() => {
+                                setGalleryPropertyId(property.id);
+                                setShowManageGalleryModal(true);
+                              }}
+                              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-semibold"
+                            >
                               Manage Gallery
                             </button>
                             <button
@@ -4863,7 +5472,6 @@ const CadreagoApp = () => {
                               Add Add-on
                             </button>
                             <button
-                              disabled={!hostIsVerified}
                               title={
                                 hostIsVerified
                                   ? `${property.status === 'active' ? 'Deactivate' : 'Activate'} listing`
@@ -4872,11 +5480,14 @@ const CadreagoApp = () => {
                               onClick={() => {
                                 if (hostIsVerified) {
                                   togglePropertyStatus(property.id);
+                                  showNotification('success', `Property ${property.status === 'active' ? 'deactivated' : 'activated'} successfully!`);
+                                } else {
+                                  showNotification('error', 'Please complete KYC and bank verification to activate this listing.');
                                 }
                               }}
                               className={`px-4 py-2 border rounded-lg transition-colors text-sm font-semibold ${
                                 !hostIsVerified
-                                  ? 'border-gray-200 text-gray-400 opacity-60 cursor-not-allowed hover:bg-transparent'
+                                  ? 'border-gray-200 text-gray-400 opacity-60 cursor-pointer hover:bg-gray-50'
                                   : property.status === 'active'
                                   ? 'border-red-200 text-red-600 hover:bg-red-50'
                                   : 'border-green-200 text-green-600 hover:bg-green-50'
@@ -5165,25 +5776,40 @@ const CadreagoApp = () => {
                 </button>
               </div>
 
-              <form className="space-y-4">
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  // For now we just keep this as a UX stub; actual Supabase createHotel()
+                  // wiring can be added later.
+                  alert('Property details captured. Saving to Supabase will be wired next.');
+                }}
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Property Name</label>
                     <input
                       type="text"
                       required
+                      value={newPropertyForm.name}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, name: e.target.value }))}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       placeholder="e.g. Sunset Beach Resort"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Property Type</label>
-                    <select className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                      <option>Hotel</option>
-                      <option>Resort</option>
-                      <option>Villa</option>
-                      <option>Guesthouse</option>
-                      <option>Apartment</option>
+                    <select
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      value={newPropertyForm.type}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, type: e.target.value }))}
+                    >
+                      <option value="">Select type</option>
+                      <option value="hotel">Hotel</option>
+                      <option value="resort">Resort</option>
+                      <option value="villa">Villa</option>
+                      <option value="guesthouse">Guesthouse</option>
+                      <option value="apartment">Apartment</option>
                     </select>
                   </div>
                 </div>
@@ -5193,6 +5819,8 @@ const CadreagoApp = () => {
                   <input
                     type="text"
                     required
+                    value={newPropertyForm.location}
+                    onChange={(e) => setNewPropertyForm(prev => ({ ...prev, location: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="City, Country"
                   />
@@ -5204,17 +5832,23 @@ const CadreagoApp = () => {
                   </div>
                   <input
                     type="text"
+                    value={newPropertyForm.mapSearch}
+                    onChange={(e) => setNewPropertyForm(prev => ({ ...prev, mapSearch: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="Search property address"
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <input
                       type="text"
+                      value={newPropertyForm.latitude}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, latitude: e.target.value }))}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       placeholder="Latitude"
                     />
                     <input
                       type="text"
+                      value={newPropertyForm.longitude}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, longitude: e.target.value }))}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       placeholder="Longitude"
                     />
@@ -5225,24 +5859,30 @@ const CadreagoApp = () => {
                   <p className="text-xs text-gray-500">We’ll use Google Maps APIs to reverse geocode the exact coordinates so your property appears in the map view.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Number of Rooms</label>
                     <input
                       type="number"
                       required
                       min="1"
+                      value={newPropertyForm.rooms}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, rooms: e.target.value }))}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                       placeholder="e.g. 25"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Star Rating</label>
-                    <select className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                      <option>2 Stars</option>
-                      <option>3 Stars</option>
-                      <option>4 Stars</option>
-                      <option>5 Stars</option>
+                    <select
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      value={newPropertyForm.stars}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, stars: e.target.value }))}
+                    >
+                      <option value="">Select rating</option>
+                      {[2, 3, 4, 5].map(star => (
+                        <option key={star} value={star}>{star} Star{star > 1 ? 's' : ''}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -5251,8 +5891,21 @@ const CadreagoApp = () => {
                       type="number"
                       required
                       min="1"
+                      value={newPropertyForm.basePrice}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, basePrice: e.target.value }))}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      placeholder="$"
+                      placeholder="e.g. 3500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Offer Price (optional)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={newPropertyForm.offerPrice}
+                      onChange={(e) => setNewPropertyForm(prev => ({ ...prev, offerPrice: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g. 1800"
                     />
                   </div>
                 </div>
@@ -5261,6 +5914,8 @@ const CadreagoApp = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                   <textarea
                     rows="4"
+                    value={newPropertyForm.description}
+                    onChange={(e) => setNewPropertyForm(prev => ({ ...prev, description: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     placeholder="Describe your property..."
                   ></textarea>
@@ -5271,7 +5926,19 @@ const CadreagoApp = () => {
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {['WiFi', 'Pool', 'Parking', 'Spa', 'Gym', 'Restaurant', 'Room Service', 'Beach Access', 'Pet Friendly'].map(amenity => (
                       <label key={amenity} className="flex items-center space-x-2">
-                        <input type="checkbox" className="accent-blue-600" />
+                        <input
+                          type="checkbox"
+                          className="accent-blue-600"
+                          checked={newPropertyForm.amenities.includes(amenity)}
+                          onChange={(e) =>
+                            setNewPropertyForm(prev => ({
+                              ...prev,
+                              amenities: e.target.checked
+                                ? [...prev.amenities, amenity]
+                                : prev.amenities.filter(a => a !== amenity)
+                            }))
+                          }
+                        />
                         <span className="text-sm">{amenity}</span>
                       </label>
                     ))}
@@ -5418,6 +6085,217 @@ const CadreagoApp = () => {
             </div>
           </div>
         )}
+
+        {/* Edit Property Modal */}
+        {showEditPropertyModal && editPropertyForm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowEditPropertyModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-gray-900">Edit Property</h2>
+                <button onClick={() => setShowEditPropertyModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+              <EditPropertyFormWithHookForm
+                property={editPropertyForm}
+                onClose={() => setShowEditPropertyModal(false)}
+                onSuccess={(propertyId, updates) => {
+                  setHostProperties((prev) =>
+                    prev.map((p) => (p.id === propertyId ? { ...p, ...updates } : p))
+                  );
+                }}
+                showNotification={showNotification}
+                updateHotel={updateHotel}
+              />
+            </div>
+          </div>
+        )}
+
+
+        {/* View Property Modal */}
+        {showViewPropertyModal && viewPropertyData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowViewPropertyModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-gray-900">Property Details</h2>
+                <button onClick={() => setShowViewPropertyModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                {viewPropertyData.image && (
+                  <div className="w-full h-64 rounded-lg overflow-hidden">
+                    <img src={viewPropertyData.image} alt={viewPropertyData.name} className="w-full h-full object-cover" />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Property Name</h3>
+                    <p className="text-lg font-semibold text-gray-900">{viewPropertyData.name}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Location</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.location}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Type</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.type}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Star Rating</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.stars} Star{viewPropertyData.stars > 1 ? 's' : ''}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Number of Rooms</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.rooms}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Base Price</h3>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(viewPropertyData.basePrice)}/night</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Status</h3>
+                    <p className={`text-lg font-semibold ${viewPropertyData.status === 'active' ? 'text-green-600' : 'text-gray-500'}`}>
+                      {viewPropertyData.status === 'active' ? 'Active' : 'Inactive'}
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Rating</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.rating}/10 ({viewPropertyData.reviews} reviews)</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Occupancy Rate</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.occupancyRate}%</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Monthly Revenue</h3>
+                    <p className="text-lg font-semibold text-green-600">{formatCurrency(viewPropertyData.monthlyRevenue)}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-1">Total Bookings</h3>
+                    <p className="text-lg text-gray-900">{viewPropertyData.totalBookings}</p>
+                  </div>
+                </div>
+                {viewPropertyData.amenities && viewPropertyData.amenities.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">Amenities</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {viewPropertyData.amenities.map((amenity, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
+                          {amenity}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex justify-end pt-4">
+                  <button
+                    onClick={() => setShowViewPropertyModal(false)}
+                    className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Manage Gallery Modal */}
+        {showManageGalleryModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowManageGalleryModal(false)}>
+            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-gray-900">Manage Property Gallery</h2>
+                <button onClick={() => setShowManageGalleryModal(false)} className="text-gray-500 hover:text-gray-700">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                {/* Upload Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Upload New Images</h3>
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors">
+                    <div className="flex flex-col items-center">
+                      <Upload size={48} className="text-gray-400 mb-3" />
+                      <p className="text-gray-600 mb-2">Drag and drop images here or click to browse</p>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        className="hidden"
+                        id="gallery-upload"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          if (files.length > 0) {
+                            showNotification('success', `${files.length} image(s) uploaded successfully!`);
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor="gallery-upload"
+                        className="mt-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer font-semibold"
+                      >
+                        Choose Files
+                      </label>
+                      <p className="text-sm text-gray-500 mt-2">Supported formats: JPG, PNG, WEBP (Max 5MB each)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Current Images Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Current Images</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {(() => {
+                      const property = hostProperties.find(p => p.id === galleryPropertyId);
+                      if (!property || !property.image) {
+                        return (
+                          <div className="col-span-full text-center py-8 text-gray-500">
+                            No images uploaded yet. Upload your first image above.
+                          </div>
+                        );
+                      }
+                      // Show the current property image (in real app, this would be an array of images)
+                      return (
+                        <div className="relative group">
+                          <img
+                            src={property.image}
+                            alt={property.name}
+                            className="w-full h-40 object-cover rounded-lg"
+                          />
+                          <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-opacity rounded-lg flex items-center justify-center">
+                            <button
+                              onClick={() => {
+                                if (window.confirm('Are you sure you want to delete this image?')) {
+                                  showNotification('success', 'Image deleted successfully!');
+                                }
+                              }}
+                              className="opacity-0 group-hover:opacity-100 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-opacity font-semibold flex items-center gap-2"
+                            >
+                              <Trash2 size={18} />
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4 border-t">
+                  <button
+                    onClick={() => setShowManageGalleryModal(false)}
+                    className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-semibold"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showPayoutModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowPayoutModal(false)}>
             <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
@@ -5535,12 +6413,229 @@ const CadreagoApp = () => {
       
       <div className="flex-grow">
         {currentView === 'home' && <HomePage />}
-        {currentView === 'search' && <SearchResults />}
-        {currentView === 'details' && <HotelDetails />}
-        {currentView === 'booking' && <BookingView />}
-        {currentView === 'dashboard' && <Dashboard />}
-        {currentView === 'host-onboarding' && <HostOnboarding />}
-        {currentView === 'host-dashboard' && <HostDashboard />}
+        {currentView === 'search' && (
+          <SearchResultsPage
+            Banner={Banner}
+            DestinationSearchInput={DestinationSearchInput}
+            FilterBar={FilterBar}
+            searchInputRef={searchInputRef}
+            destinationInput={destinationInput}
+            handleDestinationInputChange={handleDestinationInputChange}
+            handleDestinationInputFocus={handleDestinationInputFocus}
+            handleSuggestionsBlur={handleSuggestionsBlur}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleSelectSuggestion={handleSelectSuggestion}
+            locationLoading={locationLoading}
+            searchParams={searchParams}
+            setSearchParams={setSearchParams}
+            todayIso={todayIso}
+            getNextDayIso={getNextDayIso}
+            getGuestText={getGuestText}
+            setShowGuestSelector={setShowGuestSelector}
+            handleSearch={handleSearch}
+            showMoreFilters={showMoreFilters}
+            setShowMoreFilters={setShowMoreFilters}
+            displayedHotels={displayedHotels}
+            hotelsLoading={hotelsLoading}
+            formatCurrency={formatCurrency}
+            getRatingColor={getRatingColor}
+            handleOpenProperty={handleOpenProperty}
+            hoveredHotelId={hoveredHotelId}
+            setHoveredHotelId={setHoveredHotelId}
+            mapSelectedHotel={mapSelectedHotel}
+            setMapSelectedHotel={setMapSelectedHotel}
+            zoomToHotelId={zoomToHotelId}
+            setZoomToHotelId={setZoomToHotelId}
+            mapError={mapError}
+            mapDirty={mapDirty}
+            setMapDirty={setMapDirty}
+            showMapViewHotels={showMapViewHotels}
+            setShowMapViewHotels={setShowMapViewHotels}
+            handleHotelMarkerClick={handleHotelMarkerClick}
+            handleHotelMarkerHover={handleHotelMarkerHover}
+            handleMapReady={handleMapReady}
+            handleBoundsChanged={handleBoundsChanged}
+          />
+        )}
+        {currentView === 'details' && (
+          <HotelDetailsPage
+            selectedHotel={selectedHotel}
+            searchParams={searchParams}
+            favorites={favorites}
+            formatCurrency={formatCurrency}
+            getRatingColor={getRatingColor}
+            getRatingBarWidth={getRatingBarWidth}
+            renderAddonIcon={renderAddonIcon}
+            availableAddons={availableAddons}
+            onClose={handleCloseDetails}
+            onToggleFavorite={toggleFavorite}
+            onShowShare={(url) => {
+              setShareUrl(url);
+              setShowShareModal(true);
+            }}
+            onOpenImageGallery={(index) => {
+              setCurrentImageIndex(index);
+              setShowImageGallery(true);
+            }}
+            onStartBooking={() => {
+              setShowPaymentForm(false);
+              setCurrentView('booking');
+            }}
+            isLoggedIn={isLoggedIn}
+            onOpenHostMessage={() => setShowMessageHostModal(true)}
+            onRequireLoginAsGuest={() => {
+              setPreferredUserType('guest');
+              setAuthMode('login');
+              setShowAuthModal(true);
+            }}
+          />
+        )}
+        {currentView === 'booking' && (
+          <BookingViewPage
+            selectedHotel={selectedHotel}
+            searchParams={searchParams}
+            todayIso={todayIso}
+            getNextDayIso={getNextDayIso}
+            getGuestText={getGuestText}
+            calculateNights={calculateNights}
+            calculateAddonsTotal={calculateAddonsTotal}
+            GST_RATE={GST_RATE}
+            availableAddons={availableAddons}
+            selectedAddons={selectedAddons}
+            bookingDateError={bookingDateError}
+            bookingAvailability={bookingAvailability}
+            showNotification={showNotification}
+            setShowPaymentForm={setShowPaymentForm}
+            formatDate={formatDate}
+            handleBookingCheckInChange={handleBookingCheckInChange}
+            handleBookingCheckOutChange={handleBookingCheckOutChange}
+          />
+        )}
+        {currentView === 'dashboard' && (
+          <DashboardPage
+            isLoggedIn={isLoggedIn}
+            onRequireLogin={() => (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+                <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                  Please login to access your dashboard
+                </h2>
+                <button
+                  onClick={() => {
+                    setAuthMode('login');
+                    setShowAuthModal(true);
+                  }}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                >
+                  Login Now
+                </button>
+              </div>
+            )}
+            paymentHistory={paymentHistory}
+            userBookings={userBookings}
+            userMessages={userMessages}
+            dashboardTab={dashboardTab}
+            setDashboardTab={setDashboardTab}
+            formatDate={formatDate}
+            formatCurrency={formatCurrency}
+          />
+        )}
+        {currentView === 'host-onboarding' && (
+          <HostOnboardingPage
+            user={user}
+            aadhaar={aadhaar}
+            gstRegistered={gstRegistered}
+            gst={gst}
+            bank={bank}
+            updateProfile={updateProfile}
+            updateHostInfo={updateHostInfo}
+            showNotification={showNotification}
+            setAadhaar={setAadhaar}
+            setGstRegistered={setGstRegistered}
+            setGst={setGst}
+            setBank={setBank}
+            setHostOnboardingCompleted={setHostOnboardingCompleted}
+            setCurrentView={setCurrentView}
+            statusBadge={statusBadge}
+          />
+        )}
+        {currentView === 'host-dashboard' && (
+          <HostDashboardPage
+            isLoggedIn={isLoggedIn}
+            userType={userType}
+            hostOnboardingCompleted={hostOnboardingCompleted}
+            user={user}
+            onRequireOnboarding={() => (
+              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+                <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                  Please complete host onboarding
+                </h2>
+                <button
+                  onClick={() => {
+                    if (!isLoggedIn) {
+                      setPreferredUserType('host');
+                      setAuthMode('login');
+                      setShowAuthModal(true);
+                    } else {
+                      setCurrentView('host-onboarding');
+                    }
+                  }}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                >
+                  {isLoggedIn ? 'Resume Onboarding' : 'Login as Host'}
+                </button>
+              </div>
+            )}
+            hostProperties={hostProperties}
+            aadhaar={aadhaar}
+            bank={bank}
+            gstRegistered={gstRegistered}
+            gst={gst}
+            updateProfile={updateProfile}
+            updateHostInfo={updateHostInfo}
+            showNotification={showNotification}
+            setAadhaar={setAadhaar}
+            setGstRegistered={setGstRegistered}
+            setGst={setGst}
+            setBank={setBank}
+            hostDashboardTab={hostDashboardTab}
+            setHostDashboardTab={setHostDashboardTab}
+            propertyBookings={propertyBookings}
+            formatDate={formatDate}
+            hostRefunds={hostRefunds}
+            hostMessages={hostMessages}
+            hostPayouts={hostPayouts}
+            setEditPropertyForm={setEditPropertyForm}
+            setShowEditPropertyModal={setShowEditPropertyModal}
+            setViewPropertyData={setViewPropertyData}
+            setShowViewPropertyModal={setShowViewPropertyModal}
+            setGalleryPropertyId={setGalleryPropertyId}
+            setShowManageGalleryModal={setShowManageGalleryModal}
+            setAddonForm={setAddonForm}
+            DEFAULT_ADDON_ICON={DEFAULT_ADDON_ICON}
+            togglePropertyStatus={togglePropertyStatus}
+            formatCurrency={formatCurrency}
+            setShowAddPropertyModal={setShowAddPropertyModal}
+            setShowAddAddonModal={setShowAddAddonModal}
+            setShowPayoutModal={setShowPayoutModal}
+            statusBadge={statusBadge}
+            onOpenMessages={() => {
+              scrollToTop();
+              setCurrentView('host-messages');
+            }}
+          />
+        )}
+        {currentView === 'host-messages' && (
+          <HostMessagesPage
+            isLoggedIn={isLoggedIn}
+            userType={userType}
+            hostMessages={hostMessages}
+            formatDate={formatDate}
+            user={user}
+            onBack={() => setCurrentView('host-dashboard')}
+          />
+        )}
+        {currentView === 'admin-dashboard' && <AdminDashboardPage />}
       </div>
 
       <Footer />
@@ -5551,6 +6646,895 @@ const CadreagoApp = () => {
       <ShareModal />
       <ImageGalleryModal />
       <HostMessageModal />
+
+      {/* Host / property modals */}
+      {/* Add Property Modal */}
+      {showAddPropertyModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowAddPropertyModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 md:p-8 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Add New Property
+              </h2>
+              <button
+                onClick={() => setShowAddPropertyModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                alert(
+                  'Property details captured. Saving to Supabase will be wired next.'
+                );
+              }}
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Property Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newPropertyForm.name}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        name: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. Sunset Beach Resort"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Property Type
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    value={newPropertyForm.type}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        type: e.target.value
+                      }))
+                    }
+                  >
+                    <option value="">Select type</option>
+                    <option value="hotel">Hotel</option>
+                    <option value="resort">Resort</option>
+                    <option value="villa">Villa</option>
+                    <option value="guesthouse">Guesthouse</option>
+                    <option value="apartment">Apartment</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Location
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newPropertyForm.location}
+                  onChange={(e) =>
+                    setNewPropertyForm((prev) => ({
+                      ...prev,
+                      location: e.target.value
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="City, Country"
+                />
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Pin on Map
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    Google Maps search
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={newPropertyForm.mapSearch}
+                  onChange={(e) =>
+                    setNewPropertyForm((prev) => ({
+                      ...prev,
+                      mapSearch: e.target.value
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Search property address"
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    value={newPropertyForm.latitude}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        latitude: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Latitude"
+                  />
+                  <input
+                    type="text"
+                    value={newPropertyForm.longitude}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        longitude: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="Longitude"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm font-semibold"
+                >
+                  Use Map Picker (Coming Soon)
+                </button>
+                <p className="text-xs text-gray-500">
+                  We’ll use Google Maps APIs to reverse geocode the exact
+                  coordinates so your property appears in the map view.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Number of Rooms
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={newPropertyForm.rooms}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        rooms: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. 25"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Star Rating
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    value={newPropertyForm.stars}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        stars: e.target.value
+                      }))
+                    }
+                  >
+                    <option value="">Select rating</option>
+                    {[2, 3, 4, 5].map((star) => (
+                      <option key={star} value={star}>
+                        {star} Star{star > 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Base Price (per night)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={newPropertyForm.basePrice}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        basePrice: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. 3500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Offer Price (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newPropertyForm.offerPrice}
+                    onChange={(e) =>
+                      setNewPropertyForm((prev) => ({
+                        ...prev,
+                        offerPrice: e.target.value
+                      }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. 1800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  rows="4"
+                  value={newPropertyForm.description}
+                  onChange={(e) =>
+                    setNewPropertyForm((prev) => ({
+                      ...prev,
+                      description: e.target.value
+                    }))
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Describe your property..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Amenities
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    'WiFi',
+                    'Pool',
+                    'Parking',
+                    'Spa',
+                    'Gym',
+                    'Restaurant',
+                    'Room Service',
+                    'Beach Access',
+                    'Pet Friendly'
+                  ].map((amenity) => (
+                    <label
+                      key={amenity}
+                      className="flex items-center space-x-2"
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-blue-600"
+                        checked={newPropertyForm.amenities.includes(amenity)}
+                        onChange={(e) =>
+                          setNewPropertyForm((prev) => ({
+                            ...prev,
+                            amenities: e.target.checked
+                              ? [...prev.amenities, amenity]
+                              : prev.amenities.filter((a) => a !== amenity)
+                          }))
+                        }
+                      />
+                      <span className="text-sm">{amenity}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload Images
+                </label>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                  <p className="text-gray-600">
+                    Drag and drop images here or click to browse
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                  >
+                    Choose Files
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-6 flex space-x-4">
+                <button
+                  type="submit"
+                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                >
+                  Add Property
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddPropertyModal(false)}
+                  className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-semibold"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showAddAddonModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowAddAddonModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Create Add-on</h2>
+              <button
+                onClick={() => setShowAddAddonModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                alert('Add-on saved for host property!');
+                setAddonForm({
+                  propertyId: hostProperties[0]?.id || '',
+                  name: '',
+                  description: '',
+                  price: '',
+                  icon: DEFAULT_ADDON_ICON
+                });
+                setShowAddAddonModal(false);
+              }}
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Property
+                </label>
+                <select
+                  required
+                  value={addonForm.propertyId}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      propertyId: e.target.value
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select property</option>
+                  {hostProperties.map((property) => (
+                    <option key={property.id} value={property.id}>
+                      {property.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Add-on Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={addonForm.name}
+                  onChange={(e) =>
+                    setAddonForm({ ...addonForm, name: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. Candlelight Dinner"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows="3"
+                  value={addonForm.description}
+                  onChange={(e) =>
+                    setAddonForm({
+                      ...addonForm,
+                      description: e.target.value
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Describe what is included"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Price (INR)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={addonForm.price}
+                  onChange={(e) =>
+                    setAddonForm({ ...addonForm, price: e.target.value })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g. 1200"
+                />
+              </div>
+              <div>
+                <p className="block text-sm font-medium text-gray-700 mb-1">
+                  Icon
+                </p>
+                <div className="grid grid-cols-4 gap-2">
+                  {ADDON_ICON_KEYS.map((iconKey) => {
+                    const isSelected = addonForm.icon === iconKey;
+                    return (
+                      <button
+                        key={iconKey}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() =>
+                          setAddonForm({ ...addonForm, icon: iconKey })
+                        }
+                        className={`flex flex-col items-center justify-center border rounded-lg p-3 text-center focus:outline-none transition ${
+                          isSelected
+                            ? 'border-blue-600 bg-blue-50'
+                            : 'border-gray-200 bg-white hover:border-blue-200'
+                        }`}
+                      >
+                        <div className="text-2xl text-gray-700">
+                          {renderAddonIcon(iconKey, 22)}
+                        </div>
+                        <span className="text-xs text-gray-600 mt-1">
+                          {iconKey}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddAddonModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                >
+                  Save Add-on
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEditPropertyModal && editPropertyForm && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowEditPropertyModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Edit Property
+              </h2>
+              <button
+                onClick={() => setShowEditPropertyModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <EditPropertyFormWithHookForm
+              property={editPropertyForm}
+              onClose={() => setShowEditPropertyModal(false)}
+              onSuccess={(propertyId, updates) => {
+                setHostProperties((prev) =>
+                  prev.map((p) =>
+                    p.id === propertyId ? { ...p, ...updates } : p
+                  )
+                );
+              }}
+              showNotification={showNotification}
+              updateHotel={updateHotel}
+            />
+          </div>
+        </div>
+      )}
+
+      {showViewPropertyModal && viewPropertyData && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowViewPropertyModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Property Details
+              </h2>
+              <button
+                onClick={() => setShowViewPropertyModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {viewPropertyData.image && (
+                <div className="w-full h-64 rounded-lg overflow-hidden">
+                  <img
+                    src={viewPropertyData.image}
+                    alt={viewPropertyData.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Property Name
+                  </h3>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {viewPropertyData.name}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Location
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.location}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Type
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.type}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Star Rating
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.stars} Star
+                    {viewPropertyData.stars > 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Number of Rooms
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.rooms}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Base Price
+                  </h3>
+                  <p className="text-lg font-semibold text-green-600">
+                    {formatCurrency(viewPropertyData.basePrice)}/night
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Status
+                  </h3>
+                  <p
+                    className={`text-lg font-semibold ${
+                      viewPropertyData.status === 'active'
+                        ? 'text-green-600'
+                        : 'text-gray-500'
+                    }`}
+                  >
+                    {viewPropertyData.status === 'active'
+                      ? 'Active'
+                      : 'Inactive'}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Rating
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.rating}/10 ({viewPropertyData.reviews}{' '}
+                    reviews)
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Occupancy Rate
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.occupancyRate}%
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Monthly Revenue
+                  </h3>
+                  <p className="text-lg font-semibold text-green-600">
+                    {formatCurrency(viewPropertyData.monthlyRevenue)}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 mb-1">
+                    Total Bookings
+                  </h3>
+                  <p className="text-lg text-gray-900">
+                    {viewPropertyData.totalBookings}
+                  </p>
+                </div>
+              </div>
+              {viewPropertyData.amenities &&
+                viewPropertyData.amenities.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-500 mb-2">
+                      Amenities
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {viewPropertyData.amenities.map((amenity, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm"
+                        >
+                          {amenity}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              <div className="flex justify-end pt-4">
+                <button
+                  onClick={() => setShowViewPropertyModal(false)}
+                  className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-semibold"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showManageGalleryModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowManageGalleryModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">
+                Manage Property Gallery
+              </h2>
+              <button
+                onClick={() => setShowManageGalleryModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  Upload New Images
+                </h3>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors">
+                  <div className="flex flex-col items-center">
+                    <Upload size={48} className="text-gray-400 mb-3" />
+                    <p className="text-gray-600 mb-2">
+                      Drag and drop images here or click to browse
+                    </p>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                      id="gallery-upload"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        if (files.length > 0) {
+                          showNotification(
+                            'success',
+                            `${files.length} image(s) uploaded successfully!`
+                          );
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="gallery-upload"
+                      className="mt-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer font-semibold"
+                    >
+                      Choose Files
+                    </label>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Supported formats: JPG, PNG, WEBP (Max 5MB each)
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  Current Images
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {(() => {
+                    const property = hostProperties.find(
+                      (p) => p.id === galleryPropertyId
+                    );
+                    if (!property || !property.image) {
+                      return (
+                        <div className="col-span-full text-center py-8 text-gray-500">
+                          No images uploaded yet. Upload your first image above.
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="relative group">
+                        <img
+                          src={property.image}
+                          alt={property.name}
+                          className="w-full h-40 object-cover rounded-lg"
+                        />
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-opacity rounded-lg flex items-center justify-center">
+                          <button
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  'Are you sure you want to delete this image?'
+                                )
+                              ) {
+                                showNotification(
+                                  'success',
+                                  'Image deleted successfully!'
+                                );
+                              }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-opacity font-semibold flex items-center gap-2"
+                          >
+                            <Trash2 size={18} />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-4 border-t">
+                <button
+                  onClick={() => setShowManageGalleryModal(false)}
+                  className="px-6 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 font-semibold"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPayoutModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowPayoutModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-900">
+                Request Payout
+              </h2>
+              <button
+                onClick={() => setShowPayoutModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                alert(
+                  `Payout request of ₹${payoutForm.amount || 0} submitted!`
+                );
+                setPayoutForm({ amount: '', notes: '' });
+                setShowPayoutModal(false);
+              }}
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount (INR)
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={payoutForm.amount}
+                  onChange={(e) =>
+                    setPayoutForm({
+                      ...payoutForm,
+                      amount: e.target.value
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter amount"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  rows="3"
+                  value={payoutForm.notes}
+                  onChange={(e) =>
+                    setPayoutForm({
+                      ...payoutForm,
+                      notes: e.target.value
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Optional message for finance team"
+                />
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPayoutModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold"
+                >
+                  Submit Request
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

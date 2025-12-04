@@ -219,3 +219,77 @@ export const addBookingAddon = async (bookingId, addonId, quantity = 1) => {
     return { data: null, error: error.message };
   }
 };
+
+// Check if a property is available for a given date range
+// Uses overlap logic: two ranges [ci, co) and [b_ci, b_co) overlap when
+// NOT (co <= b_ci OR ci >= b_co)
+export const checkPropertyAvailability = async (
+  propertyId,
+  requestedCheckIn,
+  requestedCheckOut,
+  requestedRooms = 1
+) => {
+  try {
+    if (!propertyId || !requestedCheckIn || !requestedCheckOut) {
+      throw new Error('Missing property or date range for availability check');
+    }
+
+    const { data: property, error: propError } = await supabase
+      .from('properties')
+      .select('id, total_rooms')
+      .eq('id', propertyId)
+      .single();
+
+    if (propError) throw propError;
+    if (!property) throw new Error('Property not found');
+
+    const { data: overlapping, error: overlapError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('property_id', propertyId)
+      .in('status', ['confirmed', 'pending'])
+      // NOT (co <= b_ci)
+      .not('check_out_date', 'lte', requestedCheckIn)
+      // AND NOT (ci >= b_co)
+      .not('check_in_date', 'gte', requestedCheckOut);
+
+    if (overlapError) throw overlapError;
+
+    const roomsAlreadyBooked =
+      overlapping?.reduce((sum, booking) => {
+        // If a rooms_booked column exists, respect it; otherwise assume 1 room per booking
+        const roomsBooked =
+          typeof booking.rooms_booked === 'number' && booking.rooms_booked > 0
+            ? booking.rooms_booked
+            : 1;
+        return sum + roomsBooked;
+      }, 0) ?? 0;
+
+    const totalRooms =
+      typeof property.total_rooms === 'number' && property.total_rooms > 0
+        ? property.total_rooms
+        : null;
+
+    const roomsAvailable =
+      totalRooms !== null ? totalRooms - roomsAlreadyBooked : Infinity;
+
+    const isAvailable = roomsAvailable >= requestedRooms;
+
+    return {
+      roomsAvailable,
+      isAvailable,
+      totalRooms,
+      roomsAlreadyBooked,
+      error: null
+    };
+  } catch (error) {
+    console.error('Error checking property availability:', error);
+    return {
+      roomsAvailable: 0,
+      isAvailable: false,
+      totalRooms: null,
+      roomsAlreadyBooked: 0,
+      error: error.message || String(error)
+    };
+  }
+};

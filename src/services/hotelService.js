@@ -88,19 +88,35 @@ const transformPropertyData = (property) => {
   const imageUrls = property.property_images?.map(img => img.image_url) || [];
   const galleryImages = imageUrls.length > 0 ? imageUrls : [image];
 
+  const basePrice = parseFloat(property.base_price_per_night) || 0;
+  const offerPrice =
+    property.offer_price_per_night !== null &&
+    property.offer_price_per_night !== undefined
+      ? parseFloat(property.offer_price_per_night)
+      : null;
+
+  const hasOffer = !!offerPrice && offerPrice > 0 && offerPrice < basePrice;
+  const effectivePrice = hasOffer ? offerPrice : basePrice;
+
   return {
     ...property,
     // Map database fields to component expectations
     image,
     images: galleryImages,
-    price: parseFloat(property.base_price_per_night) || 0,
+    price: effectivePrice,
+    basePrice,
+    offerPrice,
+    hasOffer,
     currency: property.currency || 'INR', // Get currency from database
     amenities,
     coordinates,
     location: property.location || `${property.city || ''}, ${property.country || ''}`.trim(),
     stars: property.stars || 5,
+    rooms: property.total_rooms || property.rooms || 0,
+    type: property.property_type || property.type || 'Hotel',
     ratingText: property.total_reviews > 0 ? `${property.total_reviews} reviews` : 'No reviews yet',
     reviews: property.total_reviews || 0,
+    rating: property.rating || 0,
     reviewScores,
     userReviews,
     // Keep original fields for backward compatibility
@@ -114,6 +130,11 @@ const transformPropertyData = (property) => {
     limitedDeal: property.limited_deal || false,
     roomsLeft: property.rooms_left || 5,
     services: services,
+    // Host dashboard metrics (to be calculated from bookings in future)
+    totalBookings: property.total_bookings || 0,
+    monthlyRevenue: property.monthly_revenue || 0,
+    occupancyRate: property.occupancy_rate || 0,
+    status: property.status || 'active',
   };
 };
 
