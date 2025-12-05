@@ -14,7 +14,10 @@ const transformPropertyData = (property) => {
   const image = primaryImage?.image_url || firstImage?.image_url || 'https://images.unsplash.com/photo-1566073771259-6a8506099945';
 
   // Transform amenities array
-  const amenities = property.property_amenities?.map(pa => pa.amenity?.name).filter(Boolean) || [];
+  const amenities = property.property_amenities?.map(pa => {
+    // Handle both 'amenity' and 'amenities' field names
+    return pa.amenities?.name || pa.amenity?.name;
+  }).filter(Boolean) || [];
 
   // Transform coordinates
   const coordinates = property.latitude && property.longitude
@@ -153,7 +156,10 @@ export const fetchHotels = async (filters = {}) => {
           host_info:host_info!host_info_host_id_fkey(member_since, response_rate, response_time, verified, languages)
         ),
         property_images(id, image_url, is_primary, display_order),
-        property_amenities(amenity:amenities(id, name, icon, category)),
+        property_amenities(
+          amenity_id,
+          amenities(id, name, icon, category)
+        ),
         addons(id, name, description, price, icon, per_person),
         property_services(*),
         property_policies(*)
@@ -216,7 +222,10 @@ export const fetchHotelById = async (propertyId) => {
           host_info:host_info!host_info_host_id_fkey(member_since, response_rate, response_time, verified, languages, total_properties)
         ),
         property_images(id, image_url, is_primary, display_order),
-        property_amenities(amenity:amenities(id, name, icon, category)),
+        property_amenities(
+          amenity_id,
+          amenities(id, name, icon, category)
+        ),
         addons(id, name, description, price, icon, per_person),
         property_services(*),
         property_policies(*),

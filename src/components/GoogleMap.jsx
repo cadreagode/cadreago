@@ -406,7 +406,7 @@ const GoogleMapComponent = forwardRef(({
     return PriceMarkerOverlay;
   }, []);
 
-  // Initialize map (runs once)
+  // Initialize map (runs once, keeps retrying until Map constructor is ready)
   useEffect(() => {
     let pollId = null;
     let cancelled = false;
@@ -414,8 +414,13 @@ const GoogleMapComponent = forwardRef(({
     const initMap = async () => {
       if (cancelled || !divRef.current || mapRef.current) return;
 
-      if (!window.google?.maps) {
-        console.log('⏳ GoogleMap: Waiting for Google Maps JS...');
+      const hasGoogle = !!window.google?.maps;
+      const hasLegacyMap = typeof window.google?.maps?.Map === 'function';
+      const hasImportLibrary = typeof window.google?.maps?.importLibrary === 'function';
+
+      if (!hasGoogle || (!hasLegacyMap && !hasImportLibrary)) {
+        // Wait until full Maps library (including Map constructor/importLibrary) is ready
+        console.log('⏳ GoogleMap: Waiting for Google Maps JS (Map/importLibrary)...');
         return;
       }
 
@@ -452,9 +457,9 @@ const GoogleMapComponent = forwardRef(({
       }
 
       try {
-        let MapConstructor = window.google?.maps?.Map;
+        let MapConstructor = hasLegacyMap ? window.google.maps.Map : null;
 
-        if (typeof MapConstructor !== 'function' && window.google?.maps?.importLibrary) {
+        if (!MapConstructor && hasImportLibrary) {
           const { Map } = await window.google.maps.importLibrary('maps');
           if (typeof Map === 'function') {
             MapConstructor = Map;
@@ -462,7 +467,7 @@ const GoogleMapComponent = forwardRef(({
         }
 
         if (typeof MapConstructor !== 'function') {
-          console.error('GoogleMap: Map constructor not available, will retry when google.maps is ready');
+          console.error('GoogleMap: Map constructor still not available; will keep retrying...');
           return;
         }
 
@@ -514,21 +519,20 @@ const GoogleMapComponent = forwardRef(({
           }
         });
 
+        // Once map is created, we can stop polling
+        if (pollId) {
+          clearInterval(pollId);
+          pollId = null;
+        }
       } catch (err) {
         console.error('GoogleMap: Failed to initialize:', err);
       }
     };
 
-    if (window.google?.maps) {
-      initMap();
-    } else {
-      pollId = setInterval(() => {
-        if (window.google?.maps) {
-          clearInterval(pollId);
-          initMap();
-        }
-      }, 200);
-    }
+    // Poll until Map constructor/importLibrary is fully ready
+    pollId = setInterval(initMap, 200);
+    // Also try immediately in case everything is already loaded
+    initMap();
 
     return () => {
       cancelled = true;

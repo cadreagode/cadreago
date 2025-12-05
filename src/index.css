@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+@import 'react-day-picker/dist/style.css';
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -165,4 +167,34 @@ input[type="range"]::-moz-range-thumb {
   height: 56px;
   display: block;
   filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.3));
+}
+
+/* React Day Picker Custom Styles */
+.rdp {
+  --rdp-cell-size: 40px;
+  --rdp-accent-color: #2563eb;
+  --rdp-background-color: #e0e7ff;
+  margin: 1rem;
+}
+
+.rdp-months {
+  gap: 2rem;
+}
+
+.rdp-day_selected:not([disabled]) {
+  background-color: #2563eb;
+  color: white;
+}
+
+.rdp-day_selected:hover:not([disabled]) {
+  background-color: #1d4ed8;
+}
+
+.rdp-day:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: #f3f4f6;
+}
+
+.rdp-day_range_middle {
+  background-color: #e0e7ff !important;
+  color: #1e40af;
 }

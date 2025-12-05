@@ -8,6 +8,7 @@ import { fetchHotels, fetchHotelsByHost, updateHotel } from '../services/hotelSe
 import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus, checkPropertyAvailability } from '../services/bookingService';
 import { signIn, signUp, signOut, getCurrentUser, updateProfile, fetchProfileById, updateHostInfo } from '../services/authService';
 import { fetchUserPayments } from '../services/paymentService';
+import { ModernFilterBar } from './ModernFilterBar';
 import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
 import CadreagoMobileApp from './cadreagoHotelBookingMobileView';
 import GoogleMap from './GoogleMap';
@@ -116,6 +117,21 @@ function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
     return { hotels, radiusKm: null, mode: 'no-location' };
   }
 
+  // Helper to add distance info to hotels
+  const addDistanceInfo = (hotelsList) => {
+    return hotelsList.map((hotel) => {
+      if (!hotel.coordinates) return { ...hotel, distanceKm: null };
+      const { lat, lng } = hotel.coordinates;
+      const distanceKm = haversineDistanceKm(
+        searchLocation.lat,
+        searchLocation.lng,
+        lat,
+        lng
+      );
+      return { ...hotel, distanceKm };
+    });
+  };
+
   // CASE 1: user chose a specific radius (STRICT)
   if (radiusFilterKm !== null && !Number.isNaN(radiusFilterKm)) {
     const radiusKm = radiusFilterKm;
@@ -133,7 +149,11 @@ function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
     });
 
     // No expanding or nearest fallback in fixed mode
-    return { hotels: hotelsInRadius, radiusKm, mode: 'fixed' };
+    return {
+      hotels: addDistanceInfo(hotelsInRadius).sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0)),
+      radiusKm,
+      mode: 'fixed'
+    };
   }
 
   // CASE 2: AUTO MODE – smart expanding radius
@@ -151,7 +171,11 @@ function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
     });
 
     if (hotelsInRadius.length >= 5) {
-      return { hotels: hotelsInRadius, radiusKm, mode: 'auto-radius' };
+      return {
+        hotels: addDistanceInfo(hotelsInRadius).sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0)),
+        radiusKm,
+        mode: 'auto-radius'
+      };
     }
   }
 
@@ -170,7 +194,11 @@ function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
   });
 
   if (hotelsInRadius.length > 0) {
-    return { hotels: hotelsInRadius, radiusKm: maxRadius, mode: 'auto-max' };
+    return {
+      hotels: addDistanceInfo(hotelsInRadius).sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0)),
+      radiusKm: maxRadius,
+      mode: 'auto-max'
+    };
   }
 
   // Ultimate fallback: nearest anywhere (ONLY in auto mode)
@@ -197,7 +225,7 @@ function getHotelsForSearchLocation(searchLocation, hotels, radiusFilterKmRaw) {
   }
 
   return {
-    hotels: nearest ? [nearest] : [],
+    hotels: addDistanceInfo(nearest ? [nearest] : []),
     radiusKm: nearestDistance,
     mode: 'auto-nearest',
   };
@@ -779,12 +807,14 @@ const CadreagoApp = () => {
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [searchLocation, setSearchLocation] = useState(null); // { lat, lng } for radius filtering
   const [showMoreFilters, setShowMoreFilters] = useState(false);
-  const [searchParams, setSearchParams] = useState({
-    destination: '',
-    checkIn: '2025-03-12',
-    checkOut: '2025-03-28',
-    adults: 2,
-    children: 0
+  const [searchParams, setSearchParams] = useState(() => {
+    return {
+      destination: '',
+      checkIn: '',
+      checkOut: '',
+      adults: 2,
+      children: 0
+    };
   });
   const [hotels, setHotels] = useState([]);
   const [hotelsLoading, setHotelsLoading] = useState(true);
@@ -799,6 +829,11 @@ const CadreagoApp = () => {
   const [mapDirty, setMapDirty] = useState(false);
   const [notification, setNotification] = useState(null);
   const [radiusFilterKm, setRadiusFilterKm] = useState(null); // null = auto
+  const [searchMetadata, setSearchMetadata] = useState({
+    radiusKm: null,
+    mode: null,
+    searchDestination: null
+  });
   const [bookingAvailability, setBookingAvailability] = useState({
     status: 'idle', // 'idle' | 'checking' | 'available' | 'unavailable' | 'error'
     message: '',
@@ -1376,18 +1411,26 @@ const CadreagoApp = () => {
     }
   };
 
-  // Initialize host-related state from Supabase profile + host_info
-  const initializeHostFromProfile = (profile) => {
-    if (!profile) return false;
-
-    // Prefer user_role from profile if present
-    if (profile.user_role === 'host') {
-      setUserType('host');
+  // Derive host state from Supabase profile + host_info
+  const getHostStateFromProfile = (profile) => {
+    if (!profile) {
+      return { isHost: false, onboardingCompleted: false, hostInfo: null };
     }
-
     const rawHostInfo = profile.host_info;
     const hostInfo = Array.isArray(rawHostInfo) ? rawHostInfo[0] : rawHostInfo;
-    if (!hostInfo) return false;
+    if (!hostInfo) {
+      return { isHost: false, onboardingCompleted: false, hostInfo: null };
+    }
+    const onboardingCompleted = !!hostInfo.onboarding_completed || hostInfo.verified === true;
+    return { isHost: true, onboardingCompleted, hostInfo };
+  };
+
+  // Initialize host-related state from Supabase profile + host_info
+  const initializeHostFromProfile = (profile) => {
+    const { isHost, onboardingCompleted, hostInfo } = getHostStateFromProfile(profile);
+    if (!isHost || !hostInfo) return false;
+
+    setUserType('host');
 
     const aadhaarStatus = hostInfo.aadhaar_status || (hostInfo.verified ? 'verified' : 'pending');
     const gstRegisteredValue = !!hostInfo.gst_registered;
@@ -1411,9 +1454,7 @@ const CadreagoApp = () => {
       status: bankStatus
     });
 
-    const onboardingCompleted = !!hostInfo.onboarding_completed || hostInfo.verified === true;
     setHostOnboardingCompleted(onboardingCompleted);
-
     return onboardingCompleted;
   };
 
@@ -1472,11 +1513,6 @@ const CadreagoApp = () => {
       });
       setIsLoggedIn(true);
 
-      // Resolve user type based on profile role if available
-      const profileRole = data.profile?.user_role;
-      const resolvedType = profileRole === 'host' ? 'host' : type;
-      setUserType(resolvedType);
-
       // Load full profile with host_info so host onboarding state can be restored
       let profileForHost = data.profile;
       if (!profileForHost || !profileForHost.host_info) {
@@ -1486,17 +1522,35 @@ const CadreagoApp = () => {
         }
       }
 
-      if (resolvedType === 'host' && profileForHost) {
-        await ensureHostInfoRecord(data.user.id, profileForHost);
+      let isHost = false;
+      let onboardingCompleted = false;
+
+      if (profileForHost) {
+        const initialHostState = getHostStateFromProfile(profileForHost);
+        isHost = initialHostState.isHost;
+        onboardingCompleted = initialHostState.onboardingCompleted;
+
+        // If user chose "host" and has no host_info yet, create it on demand
+        if (!isHost && type === 'host') {
+          await ensureHostInfoRecord(data.user.id, profileForHost);
+          const { data: updatedProfile } = await fetchProfileById(data.user.id);
+          if (updatedProfile) {
+            profileForHost = updatedProfile;
+            const createdHostState = getHostStateFromProfile(updatedProfile);
+            isHost = createdHostState.isHost;
+            onboardingCompleted = createdHostState.onboardingCompleted;
+          }
+        }
+
+        if (isHost) {
+          onboardingCompleted = initializeHostFromProfile(profileForHost);
+        }
       }
 
-      let onboardingCompleted = hostOnboardingCompleted;
-      if (profileForHost) {
-        onboardingCompleted = initializeHostFromProfile(profileForHost);
-      }
+      setUserType(isHost ? 'host' : 'guest');
 
       setShowAuthModal(false);
-      const destination = resolvedType === 'host'
+      const destination = isHost
         ? (onboardingCompleted ? 'host-dashboard' : 'host-onboarding')
         : 'dashboard';
       setCurrentView(destination);
@@ -1521,8 +1575,10 @@ const CadreagoApp = () => {
         avatar: name.split(' ').map(n => n[0]).join('').toUpperCase()
       });
       setIsLoggedIn(true);
-      setUserType(type);
-      setShowAuthModal(false);
+
+      let isHost = false;
+      let onboardingCompleted = false;
+
       if (type === 'host') {
         try {
           await updateHostInfo(data.user.id, {
@@ -1530,15 +1586,22 @@ const CadreagoApp = () => {
             verified: false,
             member_since: new Date().toISOString()
           });
+          isHost = true;
+          onboardingCompleted = false;
+          setHostOnboardingCompleted(false);
         } catch (err) {
           console.error('Error creating initial host_info for new host:', err);
           showNotification('error', 'Host account was created, but we could not save initial host details. You can try again from the onboarding form.');
         }
-        setHostOnboardingCompleted(false);
-        setCurrentView('host-onboarding');
-      } else {
-        setCurrentView('dashboard');
       }
+
+      setUserType(isHost ? 'host' : 'guest');
+      setShowAuthModal(false);
+      setCurrentView(
+        isHost
+          ? 'host-onboarding'
+          : 'dashboard'
+      );
     }
   };
 
@@ -1597,18 +1660,20 @@ const CadreagoApp = () => {
         });
         setIsLoggedIn(true);
 
-        // Prefer profile.user_role over metadata
-        const profileRole = data.profile?.user_role;
-        if (profileRole === 'host') {
-          setUserType('host');
-          await ensureHostInfoRecord(data.user.id, data.profile);
-        } else {
-          setUserType('guest');
-        }
+        let isHost = false;
+        let onboardingCompleted = false;
 
         if (data.profile) {
-          initializeHostFromProfile(data.profile);
+          const hostState = getHostStateFromProfile(data.profile);
+          isHost = hostState.isHost;
+          onboardingCompleted = hostState.onboardingCompleted;
+
+          if (isHost) {
+            onboardingCompleted = initializeHostFromProfile(data.profile);
+          }
         }
+
+        setUserType(isHost ? 'host' : 'guest');
 
         // Load user data
         await loadUserData(data.user.id);
@@ -1794,6 +1859,13 @@ const CadreagoApp = () => {
           mode: radiusMode,
           total: hotels.length,
           inRadius: radiusHotels.length
+        });
+
+        // Store search metadata for UI display
+        setSearchMetadata({
+          radiusKm,
+          mode: radiusMode,
+          searchDestination: selectedPlace.name || searchParams.destination
         });
 
         // Use only the radius-based subset when a place is selected
@@ -2634,9 +2706,6 @@ const CadreagoApp = () => {
             </button>
           </div>
 
-          <div className="mt-4 text-center text-sm text-gray-500">
-            Demo: Use any email/password to {authMode === 'login' ? 'login' : 'sign up'}
-          </div>
         </div>
       </div>
     );
@@ -2790,22 +2859,6 @@ const CadreagoApp = () => {
                   >
                     {userType === 'host' ? 'Host Dashboard' : 'Dashboard'}
                   </button>
-                  {userType === 'host' && (
-                    <button
-                      onClick={() => {
-                        setCurrentView('host-messages');
-                        scrollToTop();
-                      }}
-                      className="relative text-blue-600 hover:text-blue-700 font-medium"
-                    >
-                      Messages
-                      {unreadHostMessages > 0 && (
-                        <span className="absolute -top-1 -right-3 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                          {unreadHostMessages}
-                        </span>
-                      )}
-                    </button>
-                  )}
                   {userType === 'guest' && (
                     <button className="text-blue-600 hover:text-blue-700 font-medium">Favorites</button>
                   )}
@@ -2985,7 +3038,7 @@ const CadreagoApp = () => {
   // Banner Component - Only shows on web/desktop
   const Banner = () => (
     showBanner && (
-      <div className="relative bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white overflow-hidden">
+      <div className="relative bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white overflow-hidden z-30">
         <div className="absolute inset-0 opacity-10 md:opacity-20">
           <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&h=400&fit=crop')] bg-cover bg-center"></div>
         </div>
@@ -3164,130 +3217,15 @@ const CadreagoApp = () => {
   ];
 
   const FilterBar = () => (
-    <div className="bg-white rounded-lg shadow-md p-4 flex flex-col gap-4 overflow-x-auto">
-      <div className="flex items-center space-x-3">
-        <Filter size={18} className="text-blue-600" />
-        <h3 className="text-sm font-semibold text-gray-800">Filters</h3>
-      </div>
-      <div className="flex flex-col gap-4 flex-1">
-        {/* Price Range Slider */}
-        <div className="w-full">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-700">Price Range</span>
-            <span className="text-xs text-gray-600">
-              {formatCurrency(filters.priceRange[0])} - {formatCurrency(filters.priceRange[1])}
-            </span>
-          </div>
-          <div className="space-y-2">
-            <input
-              type="range"
-              min="0"
-              max="100000"
-              step="1000"
-              value={filters.priceRange[1]}
-              onChange={(e) => {
-                const raw = Number(e.target.value);
-                const min = filters.priceRange[0];
-                const nextMax = Math.max(raw, min + 1000);
-                setFilters({ ...filters, priceRange: [min, nextMax] });
-              }}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-            />
-            <div className="flex gap-2">
-              <input
-                type="number"
-                placeholder="Min"
-                value={filters.priceRange[0]}
-                onChange={(e) => setFilters({...filters, priceRange: [Math.min(Number(e.target.value) || 0, filters.priceRange[1] - 1000), filters.priceRange[1]]})}
-                className="w-24 px-2 py-1 border border-gray-300 rounded text-xs"
-              />
-              <input
-                type="number"
-                placeholder="Max"
-                value={filters.priceRange[1]}
-                onChange={(e) => setFilters({...filters, priceRange: [filters.priceRange[0], Math.max(Number(e.target.value) || 100000, filters.priceRange[0] + 1000)]})}
-                className="w-24 px-2 py-1 border border-gray-300 rounded text-xs"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Rating filter */}
-        <div className="w-full">
-          <label className="block text-xs font-medium text-gray-700 mb-2">Rating</label>
-          <select
-            value={filters.rating}
-            onChange={(e) => setFilters({...filters, rating: e.target.value})}
-            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">Any rating</option>
-            <option value="9">9+ Wonderful</option>
-            <option value="8">8+ Very good</option>
-            <option value="7">7+ Good</option>
-            <option value="6">6+ Pleasant</option>
-          </select>
-        </div>
-
-        {/* Type filter */}
-        <div className="w-full">
-          <label className="block text-xs font-medium text-gray-700 mb-2">Property Type</label>
-          <select
-            value={filters.type}
-            onChange={(e) => setFilters({...filters, type: e.target.value})}
-            className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All stays</option>
-            <option value="hotels">Hotels</option>
-            <option value="resorts">Resorts</option>
-            <option value="guesthouses">Guesthouses</option>
-            <option value="farmstays">Farm stays</option>
-            <option value="apartments">Apartments</option>
-          </select>
-        </div>
-
-        {/* Radius filter */}
-        <div className="w-full">
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-slate-600">Search radius</div>
-            <div className="flex flex-wrap gap-2">
-              {RADIUS_OPTIONS.map((opt) => {
-                const isActive = radiusFilterKm === opt.value;
-                return (
-                  <Button
-                    key={opt.label}
-                    type="button"
-                    size="sm"
-                    variant={isActive ? 'default' : 'outline'}
-                    onClick={() => setRadiusFilterKm(opt.value)}
-                    className={
-                      'rounded-full px-3 py-1 text-xs ' +
-                      (isActive
-                        ? 'bg-sky-600 text-white border-sky-600 hover:bg-sky-700'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
-                    }
-                  >
-                    {opt.label}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* More filters button - centered */}
-        <div className="w-full flex justify-center">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setShowMoreFilters(!showMoreFilters)}
-            className="px-6 py-2 text-sm text-blue-600 border-blue-200 hover:bg-blue-50"
-          >
-            {showMoreFilters ? 'Hide filters' : 'More filters'}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <ModernFilterBar
+      filters={filters}
+      setFilters={setFilters}
+      formatCurrency={formatCurrency}
+      radiusFilterKm={radiusFilterKm}
+      setRadiusFilterKm={setRadiusFilterKm}
+      showMoreFilters={showMoreFilters}
+      setShowMoreFilters={setShowMoreFilters}
+    />
   );
 
   // Handle hovering over hotel card in the list (does not move map)
@@ -3460,11 +3398,11 @@ const CadreagoApp = () => {
     const activeMapHotel = mapSelectedHotel;
 
     return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="bg-gray-50 min-h-screen relative" style={{ zIndex: 1 }}>
       {/* Banner - Only visible on initial load */}
       <Banner />
       
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 relative z-20">
         {/* Breadcrumb */}
         <div className="flex items-center space-x-2 text-sm text-gray-600 mb-6">
           <button onClick={() => setCurrentView('search')} className="hover:text-blue-600">Home</button>
@@ -3473,7 +3411,7 @@ const CadreagoApp = () => {
         </div>
 
         {/* Search Bar */}
-        <div className="bg-white shadow-md rounded-lg p-4 md:p-6 mb-8">
+        <div className="bg-white shadow-md rounded-lg p-4 md:p-6 mb-5 relative z-30">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
             {/* Destination Input */}
             <div>
@@ -3544,7 +3482,7 @@ const CadreagoApp = () => {
           </button>
         </div>
 
-        <div className="mb-6 space-y-4">
+        <div className="mb-4 space-y-4">
           <FilterBar />
           {showMoreFilters && (
             <div className="bg-white rounded-lg shadow p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
@@ -3555,7 +3493,21 @@ const CadreagoApp = () => {
                     <button
                       key={item}
                       type="button"
-                      className="px-3 py-1 border border-gray-300 rounded-full hover:bg-blue-50"
+                      className={`px-3 py-1 border rounded-full hover:bg-blue-50 ${
+                        filters.amenities?.includes(item)
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-700'
+                      }`}
+                      onClick={() => {
+                        setFilters(prev => {
+                          const current = prev.amenities || [];
+                          const exists = current.includes(item);
+                          const nextAmenities = exists
+                            ? current.filter(a => a !== item)
+                            : [...current, item];
+                          return { ...prev, amenities: nextAmenities };
+                        });
+                      }}
                     >
                       {item}
                     </button>
@@ -3564,11 +3516,27 @@ const CadreagoApp = () => {
               </div>
               <div>
                 <p className="font-semibold mb-2">Distance to city</p>
-                <select className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
-                  <option>Any distance</option>
-                  <option>&lt; 5 km</option>
-                  <option>&lt; 10 km</option>
-                  <option>&lt; 20 km</option>
+                <select
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  value={
+                    radiusFilterKm === null || radiusFilterKm === undefined
+                      ? 'any'
+                      : String(radiusFilterKm)
+                  }
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'any') {
+                      setRadiusFilterKm(null);
+                    } else {
+                      const numeric = Number(value.replace('<', '').replace('km', '').trim());
+                      setRadiusFilterKm(Number.isNaN(numeric) ? null : numeric);
+                    }
+                  }}
+                >
+                  <option value="any">Any distance</option>
+                  <option value="5">&lt; 5 km</option>
+                  <option value="10">&lt; 10 km</option>
+                  <option value="20">&lt; 20 km</option>
                 </select>
               </div>
               <div>
@@ -3587,9 +3555,9 @@ const CadreagoApp = () => {
         </div>
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 md:gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-5">
           {/* Hotel List */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 relative z-10 bg-gray-50">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 space-y-3 sm:space-y-0">
               <h2 className="text-xl md:text-2xl font-bold text-gray-900">Properties found</h2>
               <div className="flex items-center space-x-2 w-full sm:w-auto">
@@ -3646,8 +3614,8 @@ const CadreagoApp = () => {
 
           {/* Map */}
               <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-md p-4 lg:sticky lg:top-20 lg:self-start">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-lg shadow-md p-3 lg:sticky" style={{ top: '5rem', alignSelf: 'flex-start', zIndex: -10 }}>
+              <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="font-semibold text-gray-900">Map view</h3>
                   <p className="text-xs text-gray-500">Tap price to preview the property</p>
@@ -3658,7 +3626,7 @@ const CadreagoApp = () => {
               <div
                 id="cadreago-map-section"
                 className="relative rounded-2xl overflow-hidden"
-                style={{ height: 'calc(100vh - 180px)', maxHeight: '600px', minHeight: '400px' }}
+                style={{ height: 'calc(100vh - 240px)', maxHeight: '700px', minHeight: '400px' }}
               >
                 {/* Loading overlay */}
                 {!mapLoaded && !mapError && (
@@ -4323,7 +4291,7 @@ const CadreagoApp = () => {
 
   // Footer Component
   const Footer = () => (
-    <footer className="bg-gray-900 text-white mt-16">
+    <footer className="bg-gray-900 text-white mt-16 relative z-30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
@@ -6418,6 +6386,8 @@ const CadreagoApp = () => {
             Banner={Banner}
             DestinationSearchInput={DestinationSearchInput}
             FilterBar={FilterBar}
+            filters={filters}
+            setFilters={setFilters}
             searchInputRef={searchInputRef}
             destinationInput={destinationInput}
             handleDestinationInputChange={handleDestinationInputChange}
@@ -6456,6 +6426,9 @@ const CadreagoApp = () => {
             handleHotelMarkerHover={handleHotelMarkerHover}
             handleMapReady={handleMapReady}
             handleBoundsChanged={handleBoundsChanged}
+            radiusFilterKm={radiusFilterKm}
+            setRadiusFilterKm={setRadiusFilterKm}
+            searchMetadata={searchMetadata}
           />
         )}
         {currentView === 'details' && (
