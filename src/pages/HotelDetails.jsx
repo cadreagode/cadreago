@@ -362,27 +362,27 @@ const HotelDetailsPage = ({
                   <h3 className="text-lg font-bold text-gray-900 mb-4">Hosted by</h3>
                   <div className="flex items-start space-x-4 mb-4">
                     <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
-                      {selectedHotel.host.avatar}
+                      {selectedHotel.host.full_name?.charAt(0).toUpperCase() || 'H'}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center space-x-2">
-                        <h4 className="font-bold text-gray-900">{selectedHotel.host.name}</h4>
-                        {selectedHotel.host.verified && (
+                        <h4 className="font-bold text-gray-900">{selectedHotel.host.full_name || 'Host'}</h4>
+                        {selectedHotel.host.host_info?.verified && (
                           <CheckCircle size={16} className="text-blue-600" />
                         )}
                       </div>
                       <p className="text-sm text-gray-600">
-                        Member since {selectedHotel.host.memberSince}
+                        Member since {selectedHotel.host.host_info?.member_since ? new Date(selectedHotel.host.host_info.member_since).getFullYear() : 'Recently'}
                       </p>
                       <p className="text-sm text-gray-600">
-                        {selectedHotel.host.properties}{' '}
-                        {selectedHotel.host.properties === 1 ? 'property' : 'properties'}
+                        {selectedHotel.host.host_info?.total_properties || 1}{' '}
+                        {(selectedHotel.host.host_info?.total_properties || 1) === 1 ? 'property' : 'properties'}
                       </p>
                     </div>
                   </div>
 
                   <p className="text-sm text-gray-600 mb-4">
-                    {selectedHotel.host.bio || 'Trusted superhost on Cadreago'}
+                    Trusted superhost on Cadreago
                   </p>
 
                   <div className="space-y-3">

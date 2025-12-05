@@ -7,24 +7,32 @@ import { supabase } from '../lib/supabaseClient';
 // Create a payment record
 export const createPayment = async (paymentData) => {
   try {
+    console.log('Creating payment with data:', paymentData);
+
+    // When creating a payment, booking_id might be null initially
+    // So we select just the basic fields without joins to avoid errors
     const { data, error } = await supabase
       .from('payments')
-      .insert([paymentData])
-      .select(`
-        *,
-        booking:bookings(
-          *,
-          property:properties(id, name, location, city, country)
-        ),
-        guest:profiles!payments_guest_id_fkey(id, full_name, email)
-      `)
+      .insert(paymentData)
+      .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        fullError: error
+      });
+      throw error;
+    }
+
+    console.log('Payment created successfully:', data);
     return { data, error: null };
   } catch (error) {
     console.error('Error creating payment:', error);
-    return { data: null, error: error.message };
+    return { data: null, error: error.message || error };
   }
 };
 

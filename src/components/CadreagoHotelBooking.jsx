@@ -655,7 +655,8 @@ const CadreagoApp = () => {
   const [showAddPropertyModal, setShowAddPropertyModal] = useState(false);
   const [showImageGallery, setShowImageGallery] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [selectedAddons, setSelectedAddons] = useState([]);
+  // Changed from array to object: { addonId: quantity }
+  const [selectedAddons, setSelectedAddons] = useState({});
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
   const [showMessageHostModal, setShowMessageHostModal] = useState(false);
@@ -1012,7 +1013,7 @@ const CadreagoApp = () => {
   // Use Supabase data for payment history (loaded in loadUserData function)
   const paymentHistory = paymentsData;
 
-  // Available add-ons
+  // Available add-ons with perDay flag
   const availableAddons = [
     {
       id: 'breakfast',
@@ -1020,7 +1021,8 @@ const CadreagoApp = () => {
       description: 'Full American breakfast for all guests',
       price: 25,
       icon: '🍳',
-      perPerson: true
+      perPerson: true,
+      perDay: true // Charged per day of stay
     },
     {
       id: 'airport',
@@ -1028,7 +1030,8 @@ const CadreagoApp = () => {
       description: 'Complimentary airport transfer service',
       price: 45,
       icon: '✈️',
-      perPerson: false
+      perPerson: false,
+      perDay: false // One-time service
     },
     {
       id: 'spa',
@@ -1036,7 +1039,8 @@ const CadreagoApp = () => {
       description: 'Full day access to spa and wellness center',
       price: 60,
       icon: '💆',
-      perPerson: true
+      perPerson: true,
+      perDay: false // One-time or user can choose quantity
     },
     {
       id: 'parking',
@@ -1044,7 +1048,8 @@ const CadreagoApp = () => {
       description: 'Premium valet parking service',
       price: 30,
       icon: '🚗',
-      perPerson: false
+      perPerson: false,
+      perDay: true // Charged per day
     },
     {
       id: 'lateCheckout',
@@ -1052,7 +1057,8 @@ const CadreagoApp = () => {
       description: 'Checkout at 3 PM instead of 11 AM',
       price: 50,
       icon: '🕐',
-      perPerson: false
+      perPerson: false,
+      perDay: false // One-time fee
     },
     {
       id: 'minibar',
@@ -1060,7 +1066,8 @@ const CadreagoApp = () => {
       description: 'Complimentary premium drinks and snacks',
       price: 35,
       icon: '🥂',
-      perPerson: false
+      perPerson: false,
+      perDay: true // Restocked daily
     }
   ];
 
@@ -1307,23 +1314,97 @@ const CadreagoApp = () => {
     return parts.join(', ') || 'Select guests';
   };
 
-  // Add-ons functions
+  // Add-ons functions with quantity support
+  const updateAddonQuantity = (addonId, quantity, personCount = null) => {
+    setSelectedAddons(prev => {
+      if (quantity <= 0) {
+        const newAddons = { ...prev };
+        delete newAddons[addonId];
+        return newAddons;
+      }
+
+      const addon = availableAddons.find(a => a.id === addonId);
+      const currentData = prev[addonId] || {};
+
+      // For perPerson add-ons, maintain personCount; otherwise it's ignored
+      const newData = addon?.perPerson
+        ? {
+            quantity,
+            personCount: personCount !== null ? personCount : (currentData.personCount || Math.max(searchParams.adults, 1))
+          }
+        : { quantity, personCount: null };
+
+      return { ...prev, [addonId]: newData };
+    });
+  };
+
+  const updateAddonPersonCount = (addonId, personCount) => {
+    setSelectedAddons(prev => {
+      const currentData = prev[addonId];
+      if (!currentData) return prev;
+
+      return {
+        ...prev,
+        [addonId]: { ...currentData, personCount }
+      };
+    });
+  };
+
   const toggleAddon = (addonId) => {
-    if (selectedAddons.includes(addonId)) {
-      setSelectedAddons(selectedAddons.filter(id => id !== addonId));
+    const addon = availableAddons.find(a => a.id === addonId);
+    if (selectedAddons[addonId]) {
+      // Remove addon
+      const newAddons = { ...selectedAddons };
+      delete newAddons[addonId];
+      setSelectedAddons(newAddons);
     } else {
-      setSelectedAddons([...selectedAddons, addonId]);
+      // Add addon with default quantity of 1 and default personCount
+      const defaultPersonCount = addon?.perPerson ? Math.max(searchParams.adults, 1) : null;
+      setSelectedAddons({
+        ...selectedAddons,
+        [addonId]: { quantity: 1, personCount: defaultPersonCount }
+      });
     }
   };
 
   const calculateAddonsTotal = (nights = 1) => {
     const effectiveNights = Math.max(nights, 1);
-    return selectedAddons.reduce((total, addonId) => {
+    return Object.entries(selectedAddons).reduce((total, [addonId, addonData]) => {
       const addon = availableAddons.find(a => a.id === addonId);
       if (!addon) return total;
-      const guestsMultiplier = addon.perPerson ? Math.max(searchParams.adults, 1) : 1;
-      return total + addon.price * guestsMultiplier * effectiveNights;
+
+      const quantity = addonData.quantity || 1;
+      const personCount = addon.perPerson ? (addonData.personCount || Math.max(searchParams.adults, 1)) : 1;
+      const daysMultiplier = addon.perDay ? effectiveNights : quantity;
+
+      return total + (addon.price * personCount * daysMultiplier);
     }, 0);
+  };
+
+  // Get detailed addon breakdown for display
+  const getAddonBreakdown = (nights = 1) => {
+    const effectiveNights = Math.max(nights, 1);
+    return Object.entries(selectedAddons).map(([addonId, addonData]) => {
+      const addon = availableAddons.find(a => a.id === addonId);
+      if (!addon) return null;
+
+      const quantity = addonData.quantity || 1;
+      const personCount = addon.perPerson ? (addonData.personCount || Math.max(searchParams.adults, 1)) : 1;
+      const daysMultiplier = addon.perDay ? effectiveNights : quantity;
+      const itemTotal = addon.price * personCount * daysMultiplier;
+
+      return {
+        addon,
+        quantity,
+        personCount,
+        guestsMultiplier: personCount,
+        daysMultiplier,
+        itemTotal,
+        displayText: addon.perDay
+          ? `${addon.name} (${effectiveNights} ${effectiveNights === 1 ? 'day' : 'days'}${addon.perPerson ? `, ${personCount} ${personCount === 1 ? 'person' : 'people'}` : ''})`
+          : `${addon.name} (${quantity}x${addon.perPerson ? `, ${personCount} ${personCount === 1 ? 'person' : 'people'}` : ''})`
+      };
+    }).filter(Boolean);
   };
 
   const handleBookingCheckInChange = (e) => {
@@ -6353,9 +6434,9 @@ const CadreagoApp = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {notification && (
-        <div className="fixed top-4 right-4 z-50">
+        <div className="fixed top-4 right-4 z-[9999]">
           <div
-            className={`flex items-start space-x-3 px-4 py-3 rounded-lg shadow-md border text-sm ${
+            className={`flex items-start space-x-3 px-4 py-3 rounded-lg shadow-lg border text-sm ${
               notification.type === 'success'
                 ? 'bg-green-50 border-green-200 text-green-800'
                 : 'bg-red-50 border-red-200 text-red-800'
@@ -6468,21 +6549,30 @@ const CadreagoApp = () => {
           <BookingViewPage
             selectedHotel={selectedHotel}
             searchParams={searchParams}
+            setSearchParams={setSearchParams}
             todayIso={todayIso}
             getNextDayIso={getNextDayIso}
             getGuestText={getGuestText}
             calculateNights={calculateNights}
             calculateAddonsTotal={calculateAddonsTotal}
+            getAddonBreakdown={getAddonBreakdown}
             GST_RATE={GST_RATE}
             availableAddons={availableAddons}
             selectedAddons={selectedAddons}
+            toggleAddon={toggleAddon}
+            updateAddonQuantity={updateAddonQuantity}
+            updateAddonPersonCount={updateAddonPersonCount}
             bookingDateError={bookingDateError}
             bookingAvailability={bookingAvailability}
             showNotification={showNotification}
+            showPaymentForm={showPaymentForm}
             setShowPaymentForm={setShowPaymentForm}
             formatDate={formatDate}
             handleBookingCheckInChange={handleBookingCheckInChange}
             handleBookingCheckOutChange={handleBookingCheckOutChange}
+            isLoggedIn={isLoggedIn}
+            setShowAuthModal={setShowAuthModal}
+            setAuthMode={setAuthMode}
           />
         )}
         {currentView === 'dashboard' && (
