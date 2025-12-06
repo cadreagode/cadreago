@@ -14,9 +14,12 @@ import {
   SelectValue,
 } from '../components/ui/select';
 import { DateRangePicker } from '../components/DateRangePicker';
+import { fetchBlockedDateRanges } from '../services/bookingService';
 import { GuestPicker } from '../components/GuestPicker';
 import { createPayment } from '../services/paymentService';
+import { createBooking } from '../services/bookingService';
 import { supabase } from '../lib/supabaseClient';
+import { useStatus } from '../lib/statusContext';
 
 const BookingViewPage = React.memo(({
   selectedHotel,
@@ -48,9 +51,41 @@ const BookingViewPage = React.memo(({
 }) => {
   const paymentSectionRef = useRef(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [paymentCompleted, setPaymentCompleted] = React.useState(false);
+  const [showSuccessModal, setShowSuccessModal] = React.useState(false);
+  const [successBookingRef, setSuccessBookingRef] = React.useState(null);
   const [reservationFor, setReservationFor] = React.useState('me');
   const [tripType, setTripType] = React.useState('leisure');
   const [checkInTime, setCheckInTime] = React.useState('');
+
+  // Global status (loading/toasts)
+  const { showLoading, hideLoading, notify } = useStatus();
+
+  // Blocked date ranges for this property (used to disable dates in the picker)
+  const [blockedRanges, setBlockedRanges] = React.useState([]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const loadBlocked = async () => {
+      if (!selectedHotel?.id) return;
+      const { data, error } = await fetchBlockedDateRanges(selectedHotel.id);
+      if (!mounted) return;
+      if (error) {
+        console.error('Error fetching blocked date ranges:', error);
+        setBlockedRanges([]);
+      } else {
+        // Normalize to objects with from/to Date
+        const normalized = (data || []).map((r) => ({
+          from: r.check_in_date ? new Date(r.check_in_date) : null,
+          to: r.check_out_date ? new Date(r.check_out_date) : null,
+        }));
+        setBlockedRanges(normalized);
+      }
+    };
+
+    loadBlocked();
+    return () => { mounted = false; };
+  }, [selectedHotel?.id]);
 
   // Restore form data after login
   useEffect(() => {
@@ -211,20 +246,59 @@ const BookingViewPage = React.memo(({
 
   const handlePaymentSubmit = useCallback(async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
+  setIsSubmitting(true);
+  showLoading('Preparing payment...');
 
     try {
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
+
+      // If there's no user (session expired or invalid), prompt re-login.
+      if (!user) {
+        showNotification('error', 'Your session has expired. Please login again to continue.');
+        setAuthMode('login');
+        setShowAuthModal(true);
+        setIsSubmitting(false);
+        return;
+      }
 
       // Get guest details from form
       const firstName = document.getElementById('first-name')?.value;
       const lastName = document.getElementById('last-name')?.value;
       const email = document.getElementById('email')?.value;
 
-      // Create payment record in database first
+      // Create booking first (payments table requires booking_id)
+      const bookingData = {
+        guest_id: user.id,
+        property_id: selectedHotel.id,
+        check_in_date: searchParams.checkIn,
+        check_out_date: searchParams.checkOut,
+        num_adults: searchParams.adults || 1,
+        num_children: searchParams.children || 0,
+        room_rate: nightlyRate,
+        addons_total: addonsTotal,
+        subtotal: subtotal,
+        tax_amount: totalGst,
+        total_amount: bookingTotal,
+        is_for_self: reservationFor === 'me',
+        trip_type: tripType,
+        check_in_time: checkInTime || null
+      };
+
+      const { data: bookingRecord, error: bookingError } = await createBooking(bookingData);
+
+      if (bookingError || !bookingRecord) {
+        console.error('Error creating booking before payment:', bookingError);
+        notify('error', 'Failed to create booking. Please try again.');
+        showNotification('error', 'Failed to create booking. Please try again.');
+        setIsSubmitting(false);
+        hideLoading();
+        return;
+      }
+
+      // Create payment record linked to the booking
       const paymentData = {
-        booking_id: null, // Will be updated after booking is created
+        booking_id: bookingRecord.id,
         guest_id: user.id,
         amount: bookingTotal,
         currency: currency,
@@ -234,11 +308,14 @@ const BookingViewPage = React.memo(({
         transaction_id: null,
       };
 
+      showLoading('Initializing secure payment...');
       const { data: paymentRecord, error: paymentError } = await createPayment(paymentData);
 
       if (paymentError) {
+        notify('error', 'Failed to initialize payment.');
         showNotification('error', 'Failed to initialize payment. Please try again.');
         setIsSubmitting(false);
+        hideLoading();
         return;
       }
 
@@ -251,6 +328,17 @@ const BookingViewPage = React.memo(({
         description: `Booking at ${selectedHotel.name}`,
         image: selectedHotel.image,
         order_id: '', // You can create order from backend if needed
+        // Pass our internal payment and booking ids in notes so the webhook
+        // can map the Razorpay payment back to our records reliably. Also
+        // include some contextual info for debugging/records.
+        notes: {
+          payment_id: paymentRecord?.id || null,
+          booking_id: bookingRecord?.id || null,
+          hotel_id: selectedHotel.id,
+          check_in: searchParams.checkIn,
+          check_out: searchParams.checkOut,
+          guests: totalGuests,
+        },
         handler: async function (response) {
           // Payment successful
           try {
@@ -266,10 +354,29 @@ const BookingViewPage = React.memo(({
 
             if (updateError) throw updateError;
 
+            notify('success', 'Payment successful! Your booking is confirmed.');
             showNotification('success', 'Payment successful! Your booking is confirmed.');
-            // Redirect or show success page
+
+            // Mark local UI state so the payment button is disabled for this booking
+            setPaymentCompleted(true);
+            setShowPaymentForm(false);
+
+            // Show an in-app success modal with booking reference and auto-redirect
+            const ref = bookingRecord?.booking_ref || bookingRecord?.id || null;
+            setSuccessBookingRef(ref);
+            setShowSuccessModal(true);
+
+            // Auto-redirect after a short delay to dashboard
+            setTimeout(() => {
+              try {
+                window.location.href = '/dashboard';
+              } catch (navErr) {
+                console.warn('Navigation to dashboard failed:', navErr);
+              }
+            }, 3000);
           } catch (error) {
             console.error('Error updating payment:', error);
+            notify('error', 'Payment completed but failed to update records.');
             showNotification('error', 'Payment completed but failed to update records.');
           }
         },
@@ -278,12 +385,7 @@ const BookingViewPage = React.memo(({
           email: email,
           contact: '' // Add phone number field if available
         },
-        notes: {
-          hotel_id: selectedHotel.id,
-          check_in: searchParams.checkIn,
-          check_out: searchParams.checkOut,
-          guests: totalGuests,
-        },
+        // (notes merged above)
         theme: {
           color: '#3b82f6'
         },
@@ -305,15 +407,19 @@ const BookingViewPage = React.memo(({
 
         showNotification('error', 'Payment failed. Please try again.');
         setIsSubmitting(false);
+        setPaymentCompleted(false);
       });
 
       razorpay.open();
       setIsSubmitting(false);
+      hideLoading();
 
     } catch (error) {
       console.error('Payment error:', error);
+      notify('error', 'Payment initiation failed. Please try again.');
       showNotification('error', 'Payment initiation failed. Please try again.');
       setIsSubmitting(false);
+      hideLoading();
     }
   }, [showNotification, bookingTotal, currency, selectedHotel, searchParams, totalGuests]);
 
@@ -340,6 +446,7 @@ const BookingViewPage = React.memo(({
                     checkOut={searchParams.checkOut}
                     onCheckInChange={handleCheckInChangeWrapper}
                     onCheckOutChange={handleCheckOutChangeWrapper}
+                    blockedRanges={blockedRanges}
                   />
                 </div>
                 <div>
@@ -912,7 +1019,7 @@ const BookingViewPage = React.memo(({
                         variant="success"
                         className="w-full bg-blue-600 hover:bg-blue-700"
                         size="lg"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || paymentCompleted}
                       >
                         {isSubmitting ? 'Processing...' : 'Proceed to Payment'}
                       </Button>
@@ -924,6 +1031,35 @@ const BookingViewPage = React.memo(({
           </div>
         </div>
       </div>
+
+      {/* Success modal shown after payment completes */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black opacity-40" onClick={() => setShowSuccessModal(false)} />
+          <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 z-10">
+            <h3 className="text-lg font-semibold mb-2">Payment confirmed</h3>
+            <p className="text-sm text-gray-700 mb-4">Your payment was successful. Your booking reference is:</p>
+            <div className="mb-4">
+              <span className="inline-block px-3 py-2 bg-gray-100 rounded text-sm font-mono">{successBookingRef || '—'}</span>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                className="px-4 py-2 rounded bg-gray-100 hover:bg-gray-200"
+                onClick={() => setShowSuccessModal(false)}
+              >
+                Close
+              </button>
+              <button
+                className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                onClick={() => { window.location.href = '/dashboard'; }}
+              >
+                Go to dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 });

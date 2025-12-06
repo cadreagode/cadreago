@@ -7,6 +7,8 @@ import brandLogoDark from '../assets/logo_non-transperant.png';
 import { fetchHotels, fetchHotelsByHost, updateHotel } from '../services/hotelService';
 import { createBooking, fetchUserBookings, fetchHostBookings, updateBookingStatus, checkPropertyAvailability } from '../services/bookingService';
 import { signIn, signUp, signOut, getCurrentUser, updateProfile, fetchProfileById, updateHostInfo } from '../services/authService';
+import { initAuthListener } from '../lib/supabaseClient';
+import { useStatus } from '../lib/statusContext';
 import { fetchUserPayments } from '../services/paymentService';
 import { ModernFilterBar } from './ModernFilterBar';
 import { addToFavorites, removeFromFavorites, fetchUserFavorites } from '../services/favoriteService';
@@ -713,6 +715,34 @@ const CadreagoApp = () => {
   const [zoomToHotelId, setZoomToHotelId] = useState(null);
   const [mapZoom, setMapZoom] = useState(6);
   const [mapLoaded, setMapLoaded] = useState(false);
+  // Global status (loading/toasts)
+  const { showLoading, hideLoading, notify } = useStatus();
+
+  // Initialize Supabase auth listener to handle token refresh failures and sign-out
+  React.useEffect(() => {
+    const subscription = initAuthListener({
+      onTokenRefreshFailed: (event, session) => {
+        // Clear local state and prompt the user to sign in again
+        notify('error', 'Session expired. Please sign in again.');
+        setIsLoggedIn(false);
+        setUser(null);
+        setShowAuthModal(true);
+        setAuthMode('login');
+      },
+      onSignOut: (event, session) => {
+        notify('info', 'You have been signed out.');
+        setIsLoggedIn(false);
+        setUser(null);
+      },
+      onSignIn: (event, session) => {
+        notify('success', 'Signed in.');
+      }
+    });
+
+    return () => {
+      try { subscription?.unsubscribe?.(); } catch (e) {}
+    };
+  }, []);
   const [mapError, setMapError] = useState('');
   const [mapUserInteracted, setMapUserInteracted] = useState(false);
   const [stableMapCenter, setStableMapCenter] = useState(DEFAULT_MAP_CENTER);
@@ -1071,51 +1101,77 @@ const CadreagoApp = () => {
     }
   ];
 
-  // Mock property bookings (for host)
-  const propertyBookings = [
-    {
-      id: 1,
-      propertyName: 'Bella Vista Resort',
-      guestName: 'John Smith',
-      guestEmail: 'john@example.com',
-      checkIn: '2025-04-15',
-      checkOut: '2025-04-20',
-      guests: '2 Adults',
-      roomType: 'Deluxe Ocean View',
-      totalPrice: 280,
-      status: 'confirmed',
-      bookingRef: 'CAD001234',
-      bookingDate: '2025-03-10'
-    },
-    {
-      id: 2,
-      propertyName: 'Sunset Beach Villa',
-      guestName: 'Sarah Johnson',
-      guestEmail: 'sarah@example.com',
-      checkIn: '2025-05-01',
-      checkOut: '2025-05-07',
-      guests: '4 Adults, 2 Children',
-      roomType: 'Premium Villa',
-      totalPrice: 1960,
-      status: 'confirmed',
-      bookingRef: 'CAD001240',
-      bookingDate: '2025-03-15'
-    },
-    {
-      id: 3,
-      propertyName: 'Bella Vista Resort',
-      guestName: 'Mike Davis',
-      guestEmail: 'mike@example.com',
-      checkIn: '2025-04-25',
-      checkOut: '2025-04-28',
-      guests: '2 Adults, 1 Child',
-      roomType: 'Family Suite',
-      totalPrice: 180,
-      status: 'pending',
-      bookingRef: 'CAD001242',
-      bookingDate: '2025-03-20'
-    }
-  ];
+  // Host property bookings (loaded from Supabase)
+  const [propertyBookings, setPropertyBookings] = useState([]);
+
+  // Load bookings for host's properties when hostProperties are available
+  useEffect(() => {
+    const loadHostBookings = async () => {
+      if (!user || !user.id || userType !== 'host') return;
+
+      try {
+        // If the service exposes fetchHostBookings(hostId) we can use it to get all bookings
+        if (typeof fetchHostBookings === 'function') {
+          const { data, error } = await fetchHostBookings(user.id);
+          if (!error && data) {
+            // Normalize bookings to the shape expected by the UI where necessary
+            setPropertyBookings(
+              data.map((b) => ({
+                id: b.id,
+                propertyId: b.property_id,
+                propertyName: b.property?.name || b.property_name || '',
+                guestName: b.guest?.full_name || b.guest_name || '',
+                guestEmail: b.guest?.email || b.guest_email || '',
+                checkIn: b.check_in_date,
+                checkOut: b.check_out_date,
+                guests: `${b.num_adults || 1} Adults${b.num_children ? `, ${b.num_children} Children` : ''}`,
+                roomType: b.room_type || '',
+                totalPrice: Number(b.total_amount) || Number(b.subtotal) || 0,
+                status: b.status,
+                bookingRef: b.booking_ref,
+                bookingDate: b.created_at
+              }))
+            );
+          } else {
+            console.error('Error loading host bookings:', error);
+            setPropertyBookings([]);
+          }
+        } else {
+          // Fallback: fetch bookings per property and combine
+          const all = [];
+          for (const p of hostProperties) {
+            if (!p?.id) continue;
+            const { data, error } = await fetchPropertyBookings(p.id);
+            if (!error && Array.isArray(data)) {
+              data.forEach((b) =>
+                all.push({
+                  id: b.id,
+                  propertyId: p.id,
+                  propertyName: p.name,
+                  guestName: b.guest?.full_name || '',
+                  guestEmail: b.guest?.email || '',
+                  checkIn: b.check_in_date,
+                  checkOut: b.check_out_date,
+                  guests: `${b.num_adults || 1} Adults${b.num_children ? `, ${b.num_children} Children` : ''}`,
+                  roomType: b.room_type || '',
+                  totalPrice: Number(b.total_amount) || Number(b.subtotal) || 0,
+                  status: b.status,
+                  bookingRef: b.booking_ref,
+                  bookingDate: b.created_at
+                })
+              );
+            }
+          }
+          setPropertyBookings(all);
+        }
+      } catch (err) {
+        console.error('Unexpected error loading host bookings:', err);
+        setPropertyBookings([]);
+      }
+    };
+
+    loadHostBookings();
+  }, [user, userType, hostProperties]);
 
   const hostRefunds = [
     {
@@ -1573,117 +1629,154 @@ const CadreagoApp = () => {
 
   // Authentication functions
   const handleLogin = async (email, password, type = 'guest') => {
-    const { data, error } = await signIn(email, password);
-    if (error) {
-      alert('Login failed: ' + error);
-      return;
-    }
-
-    if (data?.user) {
-      // Prefer profile.full_name, then auth metadata, then email prefix
-      const profileName = data.profile?.full_name;
-      const metaName = data.user.user_metadata?.full_name;
-      const fallbackName = data.user.email.split('@')[0];
-      const userName = profileName || metaName || fallbackName;
-
-      setUser({
-        id: data.user.id,
-        name: userName,
-        email: data.user.email,
-        avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
-      });
-      setIsLoggedIn(true);
-
-      // Load full profile with host_info so host onboarding state can be restored
-      let profileForHost = data.profile;
-      if (!profileForHost || !profileForHost.host_info) {
-        const { data: fullProfile } = await fetchProfileById(data.user.id);
-        if (fullProfile) {
-          profileForHost = fullProfile;
+    try {
+      showLoading('Signing in...');
+      const { data, error } = await signIn(email, password);
+      if (error) {
+        // Map common Supabase/GoTrue errors to friendlier messages
+        let raw = (error?.message || error || 'Login failed');
+        let errMsg = raw;
+        const lower = String(raw).toLowerCase();
+        if (lower.includes('invalid login credentials') || lower.includes('invalid_grant')) {
+          errMsg = 'Invalid email or password.';
+        } else if (lower.includes('user not found') || lower.includes('no user')) {
+          errMsg = 'No account found for this email.';
+        } else if (lower.includes('invalid')) {
+          // generic invalid
+          errMsg = raw;
         }
+
+        notify('error', 'Login failed. ' + errMsg);
+        return { ok: false, error: errMsg };
       }
 
-      let isHost = false;
-      let onboardingCompleted = false;
+      if (data?.user) {
+        // Prefer profile.full_name, then auth metadata, then email prefix
+        const profileName = data.profile?.full_name;
+        const metaName = data.user.user_metadata?.full_name;
+        const fallbackName = data.user.email.split('@')[0];
+        const userName = profileName || metaName || fallbackName;
 
-      if (profileForHost) {
-        const initialHostState = getHostStateFromProfile(profileForHost);
-        isHost = initialHostState.isHost;
-        onboardingCompleted = initialHostState.onboardingCompleted;
+        setUser({
+          id: data.user.id,
+          name: userName,
+          email: data.user.email,
+          avatar: userName.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
+        });
+        setIsLoggedIn(true);
 
-        // If user chose "host" and has no host_info yet, create it on demand
-        if (!isHost && type === 'host') {
-          await ensureHostInfoRecord(data.user.id, profileForHost);
-          const { data: updatedProfile } = await fetchProfileById(data.user.id);
-          if (updatedProfile) {
-            profileForHost = updatedProfile;
-            const createdHostState = getHostStateFromProfile(updatedProfile);
-            isHost = createdHostState.isHost;
-            onboardingCompleted = createdHostState.onboardingCompleted;
+        // Load full profile with host_info so host onboarding state can be restored
+        let profileForHost = data.profile;
+        if (!profileForHost || !profileForHost.host_info) {
+          const { data: fullProfile } = await fetchProfileById(data.user.id);
+          if (fullProfile) {
+            profileForHost = fullProfile;
           }
         }
 
-        if (isHost) {
-          onboardingCompleted = initializeHostFromProfile(profileForHost);
+        let isHost = false;
+        let onboardingCompleted = false;
+
+        if (profileForHost) {
+          const initialHostState = getHostStateFromProfile(profileForHost);
+          isHost = initialHostState.isHost;
+          onboardingCompleted = initialHostState.onboardingCompleted;
+
+          // If user chose "host" and has no host_info yet, create it on demand
+          if (!isHost && type === 'host') {
+            await ensureHostInfoRecord(data.user.id, profileForHost);
+            const { data: updatedProfile } = await fetchProfileById(data.user.id);
+            if (updatedProfile) {
+              profileForHost = updatedProfile;
+              const createdHostState = getHostStateFromProfile(updatedProfile);
+              isHost = createdHostState.isHost;
+              onboardingCompleted = createdHostState.onboardingCompleted;
+            }
+          }
+
+          if (isHost) {
+            onboardingCompleted = initializeHostFromProfile(profileForHost);
+          }
         }
+
+        setUserType(isHost ? 'host' : 'guest');
+
+        const destination = isHost
+          ? (onboardingCompleted ? 'host-dashboard' : 'host-onboarding')
+          : 'dashboard';
+        setCurrentView(destination);
+
+        // Load user-specific data
+        await loadUserData(data.user.id);
+        notify('success', `Welcome back, ${userName}`);
+        return { ok: true };
       }
-
-      setUserType(isHost ? 'host' : 'guest');
-
-      setShowAuthModal(false);
-      const destination = isHost
-        ? (onboardingCompleted ? 'host-dashboard' : 'host-onboarding')
-        : 'dashboard';
-      setCurrentView(destination);
-
-      // Load user-specific data
-      await loadUserData(data.user.id);
+    } catch (err) {
+      console.error('Login error:', err);
+      const message = err?.message || String(err);
+      try { notify('error', `Login error: ${message}`); } catch (e) {}
+      return { ok: false, error: message };
+    } finally {
+      hideLoading();
     }
   };
 
   const handleSignup = async (name, email, password, type = 'guest') => {
-    const { data, error } = await signUp(email, password, { full_name: name, user_role: type });
-    if (error) {
-      alert('Signup failed: ' + error);
-      return;
-    }
-
-    if (data?.user) {
-      setUser({
-        id: data.user.id,
-        name: name,
-        email: email,
-        avatar: name.split(' ').map(n => n[0]).join('').toUpperCase()
-      });
-      setIsLoggedIn(true);
-
-      let isHost = false;
-      let onboardingCompleted = false;
-
-      if (type === 'host') {
-        try {
-          await updateHostInfo(data.user.id, {
-            onboarding_completed: false,
-            verified: false,
-            member_since: new Date().toISOString()
-          });
-          isHost = true;
-          onboardingCompleted = false;
-          setHostOnboardingCompleted(false);
-        } catch (err) {
-          console.error('Error creating initial host_info for new host:', err);
-          showNotification('error', 'Host account was created, but we could not save initial host details. You can try again from the onboarding form.');
-        }
+    try {
+      showLoading('Creating account...');
+      const { data, error } = await signUp(email, password, { full_name: name, user_role: type });
+      if (error) {
+        const errMsg = (error?.message || error || 'Signup failed');
+        notify('error', 'Signup failed. ' + errMsg);
+        return { ok: false, error: errMsg };
       }
 
-      setUserType(isHost ? 'host' : 'guest');
-      setShowAuthModal(false);
-      setCurrentView(
-        isHost
-          ? 'host-onboarding'
-          : 'dashboard'
-      );
+      if (data?.user) {
+        setUser({
+          id: data.user.id,
+          name: name,
+          email: email,
+          avatar: name.split(' ').map(n => n[0]).join('').toUpperCase()
+        });
+        setIsLoggedIn(true);
+
+        let isHost = false;
+        let onboardingCompleted = false;
+
+        if (type === 'host') {
+          try {
+            await updateHostInfo(data.user.id, {
+              onboarding_completed: false,
+              verified: false,
+              member_since: new Date().toISOString()
+            });
+            isHost = true;
+            onboardingCompleted = false;
+            setHostOnboardingCompleted(false);
+          } catch (err) {
+            console.error('Error creating initial host_info for new host:', err);
+            notify('error', 'Host account was created, but we could not save initial host details. You can try again from the onboarding form.');
+          }
+        }
+
+        setUserType(isHost ? 'host' : 'guest');
+        setCurrentView(
+          isHost
+            ? 'host-onboarding'
+            : 'dashboard'
+        );
+        notify('success', 'Account created — welcome!');
+        return { ok: true };
+      }
+    } catch (err) {
+      console.error('Signup error:', err);
+      const message = err?.message || String(err);
+      try { notify('error', `Signup error: ${message}`); } catch (e) {}
+      return { ok: false, error: message };
+    } finally {
+      hideLoading();
     }
+    return { ok: false, error: 'Unknown signup error' };
   };
 
   const handleLogout = async () => {
@@ -2519,17 +2612,36 @@ const CadreagoApp = () => {
 
     if (isFavorited) {
       // Remove from favorites
-      const { error } = await removeFromFavorites(user.id, hotelId);
-      if (!error) {
-        setFavoritesData(prev => prev.filter(id => id !== hotelId));
-        setFavorites(prev => prev.filter(id => id !== hotelId));
+      const { error: removeError } = await removeFromFavorites(user.id, hotelId);
+      if (removeError) {
+        // Map common Supabase/GoTrue errors to friendlier messages
+        let raw = (removeError?.message || removeError || 'Remove failed');
+        let errMsg = raw;
+        const lower = String(raw).toLowerCase();
+        if (lower.includes('invalid login credentials') || lower.includes('invalid_grant')) {
+          errMsg = 'Invalid email or password.';
+        } else if (lower.includes('user not found') || lower.includes('no user')) {
+          errMsg = 'No account found for this email.';
+        } else if (lower.includes('invalid')) {
+          // generic invalid
+          errMsg = raw;
+        }
+
+        notify('error', 'Remove failed. ' + errMsg);
+        return { ok: false, error: errMsg };
       }
+      // update state to remove
+      setFavoritesData(prev => prev.filter(id => id !== hotelId));
+      setFavorites(prev => prev.filter(id => id !== hotelId));
     } else {
       // Add to favorites
-      const { error } = await addToFavorites(user.id, hotelId);
-      if (!error) {
+      const { error: addError } = await addToFavorites(user.id, hotelId);
+      if (!addError) {
         setFavoritesData(prev => [...prev, hotelId]);
         setFavorites(prev => [...prev, hotelId]);
+      } else {
+        notify('error', 'Add favorite failed. ' + (addError?.message || addError));
+        return { ok: false, error: addError };
       }
     }
   };
@@ -2649,6 +2761,8 @@ const CadreagoApp = () => {
       confirmPassword: '',
       userType: preferredUserType // guest or host
     });
+    const [isProcessing, setIsProcessing] = React.useState(false);
+    const [authError, setAuthError] = React.useState('');
 
     React.useEffect(() => {
       if (showAuthModal) {
@@ -2658,16 +2772,38 @@ const CadreagoApp = () => {
 
     if (!showAuthModal) return null;
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
       e.preventDefault();
-      if (authMode === 'login') {
-        handleLogin(formData.email, formData.password, formData.userType);
-      } else {
-        if (formData.password === formData.confirmPassword) {
-          handleSignup(formData.name, formData.email, formData.password, formData.userType);
+      if (isProcessing) return; // avoid double submit
+      setIsProcessing(true);
+      try {
+        if (authMode === 'login') {
+          // trim email locally before sending
+          const res = await handleLogin((formData.email || '').trim(), formData.password, formData.userType);
+          if (res?.ok) {
+            // Close modal and keep form cleared
+            setShowAuthModal(false);
+            setFormData({ name: '', email: '', password: '', confirmPassword: '', userType: preferredUserType });
+            setAuthError('');
+          } else {
+            setAuthError(res?.error || 'Login failed');
+          }
         } else {
-          alert('Passwords do not match');
+          if (formData.password === formData.confirmPassword) {
+            const res = await handleSignup(formData.name, (formData.email || '').trim(), formData.password, formData.userType);
+            if (res?.ok) {
+              setShowAuthModal(false);
+              setFormData({ name: '', email: '', password: '', confirmPassword: '', userType: preferredUserType });
+              setAuthError('');
+            } else {
+              setAuthError(res?.error || 'Signup failed');
+            }
+          } else {
+            alert('Passwords do not match');
+          }
         }
+      } finally {
+        setIsProcessing(false);
       }
     };
 
@@ -2770,11 +2906,18 @@ const CadreagoApp = () => {
 
             <button
               type="submit"
-              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+              disabled={isProcessing}
+              className={`w-full px-6 py-3 rounded-lg transition-colors font-semibold ${isProcessing ? 'bg-blue-400 text-white cursor-wait' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
             >
-              {authMode === 'login' ? 'Login' : 'Sign Up'} as {formData.userType === 'guest' ? 'Guest' : 'Host'}
+              {isProcessing ? 'Processing...' : (authMode === 'login' ? 'Login' : 'Sign Up') + ' as ' + (formData.userType === 'guest' ? 'Guest' : 'Host')}
             </button>
           </form>
+
+          {authError && (
+            <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 p-3 rounded">
+              {authError}
+            </div>
+          )}
 
           <div className="mt-6 text-center">
             <button

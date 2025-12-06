@@ -20,3 +20,32 @@ export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
     }
   }
 });
+
+// Helper to initialize an auth state listener from app code.
+// Pass handlers: { onTokenRefreshFailed, onSignOut, onSignIn }
+export const initAuthListener = (handlers = {}) => {
+  const { onTokenRefreshFailed, onSignOut, onSignIn } = handlers;
+
+  const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
+    // Normalize event strings — Supabase may emit TOKEN_REFRESHED or TOKEN_REFRESH_FAILED
+    try {
+      if (event === 'TOKEN_REFRESH_FAILED' || event === 'TOKEN_REFRESH_ERROR') {
+        onTokenRefreshFailed && onTokenRefreshFailed(event, session);
+      }
+
+      if (event === 'SIGNED_OUT') {
+        onSignOut && onSignOut(event, session);
+      }
+
+      if (event === 'SIGNED_IN') {
+        onSignIn && onSignIn(event, session);
+      }
+    } catch (err) {
+      // Avoid throwing from the listener
+      // eslint-disable-next-line no-console
+      console.error('Error in auth listener handler:', err);
+    }
+  });
+
+  return subscription; // caller can call subscription.unsubscribe()
+};

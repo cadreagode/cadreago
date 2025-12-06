@@ -46,8 +46,32 @@ export const signUp = async (email, password, userData = {}) => {
 // Sign in an existing user
 export const signIn = async (email, password) => {
   try {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    // Quick existence check: if there's no profile with this email, return a friendly error
+    try {
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', normalizedEmail)
+        .limit(1);
+
+      if (profilesError) {
+        // Log but don't block sign-in flow on minor read errors
+        console.error('Error checking profile existence:', profilesError);
+      }
+
+      if (!profilesData || profilesData.length === 0) {
+        // No profile found for this email. This can happen when a user was
+        // created via an external provider or when profiles weren't populated.
+        // Do not block sign-in here — continue and let the auth call decide.
+        console.warn('No profile found for this email during sign-in; proceeding to attempt auth.');
+      }
+    } catch (checkErr) {
+      // If profile check fails unexpectedly, log and continue to try sign in (best-effort)
+      console.error('Unexpected error while checking profile existence:', checkErr);
+    }
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: normalizedEmail,
       password,
     });
 
@@ -55,14 +79,52 @@ export const signIn = async (email, password) => {
 
     // Fetch profile
     if (authData.user) {
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
+      // Try to fetch the profile. If missing, attempt to create a minimal
+      // profile row so the app UI that depends on profiles can work immediately.
+      let profileData = null;
+      try {
+        const { data: fetchedProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .single();
 
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
+        if (profileError) {
+          // Not all sign-ins will have a profiles row (OAuth, admin-created users, etc.).
+          console.warn('Profile fetch during sign-in returned error; will attempt to create if missing:', profileError.message || profileError);
+        }
+
+        profileData = fetchedProfile;
+
+        if (!profileData) {
+          // Build a minimal profile payload from available auth user metadata.
+          const email = authData.user.email || null;
+          const full_name = authData.user.user_metadata?.full_name || authData.user.user_metadata?.name || '';
+
+          try {
+            const { data: createdProfile, error: createError } = await supabase
+              .from('profiles')
+              .insert([{
+                id: authData.user.id,
+                email,
+                full_name,
+                user_role: 'guest'
+              }])
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Failed to create profile after sign-in:', createError);
+            } else {
+              profileData = createdProfile;
+              console.log('Created minimal profile after sign-in for user:', authData.user.id);
+            }
+          } catch (innerErr) {
+            console.error('Unexpected error creating profile after sign-in:', innerErr);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching/creating profile during sign-in:', err);
       }
 
       return { data: { user: authData.user, session: authData.session, profile: profileData }, error: null };

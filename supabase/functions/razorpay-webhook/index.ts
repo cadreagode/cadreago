@@ -1,5 +1,9 @@
 // supabase/functions/razorpay-webhook/index.ts
 
+// @ts-nocheck
+// This file runs in Deno when deployed. TypeScript/IDE diagnostics in the
+// editor may not resolve remote Deno imports; we disable type checking here
+// to avoid spurious 'Cannot find module' and 'Cannot find name Deno' errors.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.48.0";
 
@@ -54,22 +58,94 @@ serve(async (req: Request) => {
     if (!payment) {
       console.error("❌ No payment entity in payload");
     } else {
-      // Update existing payment record using transaction_id
-      const { error } = await supabase
-        .from("payments")
-        .update({
-          status: payment.captured ? "completed" : "pending",
-          payment_method: payment.method,
-          payment_gateway: "razorpay",
-          transaction_id: payment.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("transaction_id", payment.id);
+      try {
+        // Razorpay supports sending back custom notes. We include the local
+        // payment record id in notes when opening checkout so the webhook can
+        // directly map the Razorpay payment to our payments row.
+        const notes = payment?.notes || {};
+        let paymentRow = null;
 
-      if (error) {
-        console.error("❌ Error updating payment:", error);
-      } else {
-        console.log("✅ Payment updated:", payment.id);
+        if (notes?.payment_id) {
+          // If frontend passed our payment id into Razorpay notes, update by id
+          const { error: updErr } = await supabase
+            .from("payments")
+            .update({
+              status: payment.captured ? "completed" : "pending",
+              payment_method: payment.method,
+              payment_gateway: "razorpay",
+              transaction_id: payment.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", notes.payment_id);
+
+          if (updErr) {
+            console.error("❌ Error updating payment by id:", updErr);
+          } else {
+            console.log("✅ Payment updated by id:", notes.payment_id);
+          }
+
+          // Fetch the payment row we just updated
+          const { data: fetched, error: fetchErr } = await supabase
+            .from("payments")
+            .select("*")
+            .eq("id", notes.payment_id)
+            .maybeSingle();
+
+          if (fetchErr) console.error('❌ Error fetching payment by id:', fetchErr);
+          paymentRow = fetched || null;
+        } else {
+          // Fallback: try to update by transaction_id (in case we already set it earlier)
+          const { error: updErr } = await supabase
+            .from("payments")
+            .update({
+              status: payment.captured ? "completed" : "pending",
+              payment_method: payment.method,
+              payment_gateway: "razorpay",
+              transaction_id: payment.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("transaction_id", payment.id);
+
+          if (updErr) {
+            console.error("❌ Error updating payment by transaction_id:", updErr);
+          } else {
+            console.log("✅ Payment updated by transaction_id:", payment.id);
+          }
+
+          const { data: fetched, error: fetchErr } = await supabase
+            .from("payments")
+            .select("*")
+            .eq("transaction_id", payment.id)
+            .maybeSingle();
+
+          if (fetchErr) console.error('❌ Error fetching payment by transaction_id:', fetchErr);
+          paymentRow = fetched || null;
+        }
+
+        // If we located a payment row and it references a booking, attempt to finalize
+        // the booking (mark confirmed). Handle any DB errors gracefully.
+        if (paymentRow && paymentRow.booking_id) {
+          try {
+            const { error: bookingErr } = await supabase
+              .from('bookings')
+              .update({ status: 'confirmed', updated_at: new Date().toISOString() })
+              .eq('id', paymentRow.booking_id);
+
+            if (bookingErr) {
+              // If database constraint prevents confirmation (e.g., overlap constraint), log it.
+              console.error('❌ Error confirming booking for booking_id', paymentRow.booking_id, bookingErr);
+              // Optionally you could mark payment as 'issue' or notify admins here.
+            } else {
+              console.log('✅ Booking confirmed for booking_id', paymentRow.booking_id);
+            }
+          } catch (err) {
+            console.error('❌ Unexpected error while confirming booking:', err);
+          }
+        } else {
+          console.log('ℹ️ No local payment row found or no booking_id present to confirm.');
+        }
+      } catch (err) {
+        console.error('❌ Error handling payment.captured webhook:', err);
       }
     }
   }
@@ -127,7 +203,9 @@ async function verifyRazorpaySignature(
     );
 
     const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, bodyData);
-    const expectedSignature = bufferToHex(signatureBuffer);
+    // Razorpay sends base64-encoded HMAC-SHA256 signature. Convert the
+    // raw signature bytes to base64 for comparison.
+    const expectedSignature = bufferToBase64(signatureBuffer);
 
     return expectedSignature === signature;
   } catch (err) {
@@ -136,7 +214,13 @@ async function verifyRazorpaySignature(
   }
 }
 
-function bufferToHex(buffer: ArrayBuffer): string {
+function bufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  // Convert bytes to binary string then to base64
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // btoa is available in Deno runtime
+  return btoa(binary);
 }

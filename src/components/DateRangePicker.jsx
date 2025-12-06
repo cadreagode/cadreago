@@ -6,7 +6,7 @@ import { Button } from "./ui/button"
 import { Calendar } from "./ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
 
-export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOutChange, className }) {
+export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOutChange, className, blockedRanges = [] }) {
   const [isOpen, setIsOpen] = React.useState(false)
 
   // Parse dates safely
@@ -122,7 +122,35 @@ export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOut
             selected={range}
             onDayClick={handleDayClick}
             numberOfMonths={2}
-            disabled={(date) => date < today}
+            disabled={(date) => {
+              // User-provided blocked ranges are expected as objects with
+              // { check_in_date, check_out_date } or { from: Date, to: Date }
+              const normalized = blockedRanges.map((r) => {
+                if (!r) return null;
+                if (r.from && r.to) return { from: r.from, to: r.to };
+                // handle API shape
+                const from = r.check_in_date ? new Date(r.check_in_date) : null;
+                const to = r.check_out_date ? new Date(r.check_out_date) : null;
+                return { from, to };
+              }).filter(Boolean);
+
+              const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+              // Always disable past dates
+              if (d < today) return true;
+
+              // Disable if inside any blocked range (we treat ranges as [from, to) )
+              for (const rng of normalized) {
+                if (!rng.from || !rng.to) continue;
+                const fromDay = new Date(rng.from.getFullYear(), rng.from.getMonth(), rng.from.getDate());
+                const toDay = new Date(rng.to.getFullYear(), rng.to.getMonth(), rng.to.getDate());
+                if (d.getTime() >= fromDay.getTime() && d.getTime() < toDay.getTime()) {
+                  return true;
+                }
+              }
+
+              return false;
+            }}
           />
           {range.from && range.to && (
             <div className="px-4 py-3 border-t bg-slate-50">

@@ -24,12 +24,24 @@ const TabsList = React.forwardRef(
       {...props}
     >
       {React.Children.map(children, (child) => {
-        if (React.isValidElement(child)) {
+        // Only inject tab props into TabTrigger (or elements that look like tab triggers).
+        // Avoid adding `currentValue`/`onValueChange` to plain DOM elements (e.g. headings)
+        if (!React.isValidElement(child)) return child
+
+        const childType = child.type
+        const isTrigger =
+          // If the child is our TabsTrigger component
+          (childType && (childType.displayName === 'TabsTrigger' || childType.name === 'TabsTrigger')) ||
+          // Or the child explicitly has a `value` prop (likely a trigger)
+          (child.props && typeof child.props.value !== 'undefined')
+
+        if (isTrigger) {
           return React.cloneElement(child, {
             currentValue: value,
-            onValueChange
+            onValueChange,
           })
         }
+
         return child
       })}
     </div>

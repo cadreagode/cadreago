@@ -49,13 +49,13 @@ const DashboardPage = ({
                 id: 'bookings',
                 label: 'My Bookings',
                 icon: '📋',
-                count: userBookings.filter((b) => b.status !== 'completed').length
+                count: (userBookings || []).filter((b) => b.status !== 'completed').length
               },
               {
                 id: 'messages',
                 label: 'Messages',
                 icon: '💬',
-                count: userMessages.filter((m) => !m.read).length
+                count: (userMessages || []).filter((m) => !m.read).length
               },
               { id: 'payments', label: 'Payment History', icon: '💳' },
               { id: 'profile', label: 'Profile', icon: '👤' }
@@ -80,77 +80,86 @@ const DashboardPage = ({
             ))}
           </div>
         </div>
-
         <div className="bg-white rounded-lg shadow-md p-6">
           {dashboardTab === 'bookings' && (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                My Bookings
-              </h2>
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">My Bookings</h2>
               <div className="space-y-4">
-                {userBookings.map((booking) => (
-                  <div
-                    key={booking.id}
-                    className="border rounded-lg p-4 hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex flex-col md:flex-row gap-4">
-                      <img
-                        src={booking.image}
-                        alt={booking.hotelName}
-                        className="w-full md:w-48 h-32 object-cover rounded-lg"
-                      />
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h3 className="text-xl font-bold text-gray-900">
-                              {booking.hotelName}
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              {booking.location}
-                            </p>
+                {(userBookings || []).map((raw) => {
+                  const booking = {
+                    id: raw.id,
+                    bookingRef: raw.booking_ref || raw.bookingRef,
+                    hotelName: raw.property?.name || raw.hotelName || (raw.property?.title || ''),
+                    image:
+                      raw.property?.property_images?.[0]?.image_url ||
+                      raw.image ||
+                      (raw.property?.image || ''),
+                    location: raw.property?.location || raw.location || '',
+                    status: raw.status || 'pending',
+                    checkIn: raw.check_in_date || raw.checkIn,
+                    checkOut: raw.check_out_date || raw.checkOut,
+                    guests: (raw.num_adults || raw.adults || 0) + (raw.num_children || raw.children || 0),
+                    totalPrice: raw.total_amount || raw.totalPrice || 0,
+                    paymentStatus:
+                      Array.isArray(raw.payments) && raw.payments.length > 0
+                        ? raw.payments[0].status
+                        : raw.paymentStatus || null
+                  };
+
+                  return (
+                    <div key={booking.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <img src={booking.image} alt={booking.hotelName} className="w-full md:w-48 h-32 object-cover rounded-lg" />
+                        <div className="flex-1">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <h3 className="text-xl font-bold text-gray-900">{booking.hotelName}</h3>
+                              <p className="text-sm text-gray-600">{booking.location}</p>
+                              {booking.bookingRef && <p className="text-xs text-gray-500 mt-1">Ref: {booking.bookingRef}</p>}
+                            </div>
+                            <div className="text-right">
+                              <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                                booking.status === 'confirmed'
+                                  ? 'bg-green-100 text-green-800'
+                                  : booking.status === 'pending'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1) : 'Pending'}
+                              </div>
+                              {booking.paymentStatus && (
+                                <div className="mt-2 text-sm">
+                                  <span className="text-gray-500">Payment:</span>{' '}
+                                  <span className={`font-semibold ${String(booking.paymentStatus).toLowerCase() === 'completed' ? 'text-green-700' : 'text-yellow-700'}`}>
+                                    {String(booking.paymentStatus).charAt(0).toUpperCase() + String(booking.paymentStatus).slice(1)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <span
-                            className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                              booking.status === 'confirmed'
-                                ? 'bg-green-100 text-green-800'
-                                : booking.status === 'pending'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}
-                          >
-                            {booking.status
-                              .charAt(0)
-                              .toUpperCase() + booking.status.slice(1)}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4">
-                          <div>
-                            <p className="text-gray-500">Check-in</p>
-                            <p className="font-semibold">
-                              {formatDate(booking.checkIn)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Check-out</p>
-                            <p className="font-semibold">
-                              {formatDate(booking.checkOut)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Guests</p>
-                            <p className="font-semibold">{booking.guests}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Total</p>
-                            <p className="font-semibold text-blue-600">
-                              {formatCurrency(booking.totalPrice || 0)}
-                            </p>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4">
+                            <div>
+                              <p className="text-gray-500">Check-in</p>
+                              <p className="font-semibold">{formatDate(booking.checkIn)}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Check-out</p>
+                              <p className="font-semibold">{formatDate(booking.checkOut)}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Guests</p>
+                              <p className="font-semibold">{booking.guests}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Total</p>
+                              <p className="font-semibold text-blue-600">{formatCurrency(booking.totalPrice || 0)}</p>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
